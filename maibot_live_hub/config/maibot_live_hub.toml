@@ -1,0 +1,37 @@
+[hub]
+listen_host = "127.0.0.1"
+listen_port = 18190
+title = "MaiBot Live Hub"
+source_adapter_config = "plugins/maibot_bilibili_live_adapter_copy/config.toml"
+recent_events_limit = 400
+history_snapshot_limit = 200
+preload_history_on_startup = true
+preload_history_limit = 20
+
+[input]
+enabled = true
+default_username = "Hub Local"
+default_user_id = "hub-local"
+
+[client_api]
+enabled = true
+presence_ttl_sec = 30
+
+[speech]
+enabled = true
+stale_speaker_timeout_sec = 180
+
+[clients."maibot-r-devold"]
+forward_user_id = "neuro-sama"
+forward_username = "Neuro-sama"
+
+[clients."maibot-r-devold-instance2"]
+forward_user_id = "evil-neuro"
+forward_username = "Evil Neuro"
+
+[bilibili]
+# Keep these aligned with the live adapter's proven capture strategy,
+# but turn history fallback on for the standalone hub by default.
+history_fallback_enabled = true
+parallel_ws_connections = 4
+danmaku_idle_reconnect_sec = 60.0

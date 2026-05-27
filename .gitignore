@@ -1,0 +1,53 @@
+# ═══════════════════════════════════════════
+# 环境变量 / 密钥
+# ═══════════════════════════════════════════
+.env
+
+# ═══════════════════════════════════════════
+# Python
+# ═══════════════════════════════════════════
+__pycache__/
+*.pyc
+*.egg-info/
+
+# ═══════════════════════════════════════════
+# 本地数据 (运行时生成, 不提交)
+# ═══════════════════════════════════════════
+data/bili_cookie.json
+data/bili_ws_capture.json
+data/full_live_test_log.json
+data/events/
+data/sessions/
+data/memory/
+data/training/
+data/knowledge/
+data/graphiti/
+data/graphiti_*/
+data/logs/
+data/recordings/
+logs/
+
+# ═══════════════════════════════════════════
+# MaiBot Live Hub — 本地配置 (保留 .example 模板)
+# ═══════════════════════════════════════════
+maibot_live_hub/plugins/*/config.toml
+maibot_live_hub/*.log
+maibot_live_hub/tmp_*
+
+# ═══════════════════════════════════════════
+# IDE / 工具 / 缓存
+# ═══════════════════════════════════════════
+.vscode/
+.idea/
+.claude/
+.ralph/
+.omo/
+.playwright-mcp/
+.ruff_cache/
+.pytest_cache/
+
+# ═══════════════════════════════════════════
+# Node / GUI
+# ═══════════════════════════════════════════
+gui/node_modules/
+gui/dist/

@@ -1,0 +1,29 @@
+# AI 主播 双模型架构 — 依赖
+
+# 核心
+pyyaml>=6.0
+python-Levenshtein>=0.25
+python-dotenv>=1.0
+
+# S2 模型 (DeepSeek / OpenAI-compatible)
+openai>=1.50
+
+# 记忆系统
+chromadb>=0.5
+psycopg2-binary>=2.9
+neo4j>=5.20
+graphiti-core[kuzu]>=0.20
+
+# 视觉
+numpy>=1.26
+Pillow>=10.0
+mss>=9.0
+
+# 可观测性
+prometheus-client>=0.19
+
+# 异步
+aiohttp>=3.9
+
+# GUI (可选, Phase 5)
+# electron + react 依赖见 gui/package.json

@@ -1,0 +1,357 @@
+# MaiBot Bilibili Live Adapter — Example Config
+# Copy this file to config.toml and fill in your local paths.
+# config.toml is gitignored and will NOT be committed.
+
+[plugin]
+enabled = false
+config_version = "0.2.1"
+
+[bilibili]
+room_id = 4538234
+uid = 0
+ws_url = "wss://broadcastlv.chat.bilibili.com/sub"
+heartbeat_interval_sec = 30.0
+reconnect_delay_sec = 5.0
+connect_timeout_sec = 10.0
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+route_gifts_as_messages = true
+
+[identity]
+bot_user_id = "maibot-live"
+bot_nickname = "MaiBot Live"
+route_scope = ""
+
+[filters]
+ignored_user_ids = []
+blocked_words = []
+min_text_length = 1
+
+[interaction]
+enabled = true
+window_seconds = 2.0
+max_batch_size = 30
+max_selected_per_window = 2
+route_all_when_pending_leq = 3
+min_inject_interval_sec = 2.0
+max_injections_per_minute = 12
+speaking_slowdown_factor = 0.35
+bot_names = [
+    "maibot",
+    "mai",
+]
+keywords = []
+llm_enabled = true
+llm_timeout_sec = 4.0
+idle_topic_enabled = true
+idle_topic_after_sec = 15.0
+idle_topic_prompt = "直播间暂时没有新弹幕，请主动找一个轻松的话题和观众聊聊。"
+
+[napcat]
+disable_on_live_connect = true
+restore_on_live_disconnect = false
+control_api_name = "adapter.napcat.connection.set_enabled"
+
+[live2d]
+enabled = true
+driver = "json"
+http_url = ""
+websocket_url = "ws://127.0.0.1:18081/live2d"
+auth_token = ""
+connect_timeout_sec = 10.0
+send_bot_replies = true
+forward_inbound_danmaku = false
+mirror_other_platform_replies = true
+
+[live2d.adaptive]
+enabled = true
+model_path = ""
+safety_level = "normal"
+min_confidence = 0.6
+
+[live2d.sync]
+enabled = true
+chars_per_second = 7.5
+prepare_ms = 180
+release_ms = 600
+mouth_update_interval_ms = 50
+mouth_closed_value = 0.0
+mouth_open_threshold = 0.035
+mouth_open_gamma = 0.75
+mouth_open_gain = 2.15
+mouth_open_max = 1.0
+mouth_sync_mode = "vts_native"
+mouth_amplitude_mix = 0.35
+mouth_viseme_lead_ms = 0
+mouth_open_smoothing = 0.58
+mouth_open_attack_smoothing = 0.32
+mouth_open_release_smoothing = 0.72
+mouth_open_min_delta = 0.03
+mouth_form_smoothing = 0.45
+mouth_form_min_delta = 0.04
+mouth_keyframe_transition_ms = 110
+viseme_timeline_enabled = false
+mouth_vowel_a_open = 1.0
+mouth_vowel_a_form = 1.0
+mouth_vowel_e_open = 0.6
+mouth_vowel_e_form = 0.6
+mouth_vowel_i_open = 0.2
+mouth_vowel_i_form = 0.5
+mouth_vowel_o_open = 1.0
+mouth_vowel_o_form = 0.0
+mouth_vowel_u_open = 0.3
+mouth_vowel_u_form = 0.2
+parameter_keepalive_ms = 650
+lip_sync_only_mode = false
+idle_motion_enabled = false
+idle_motion_model = "hiyori"
+idle_motion_name = "m01"
+idle_motion_file = "m01.motion3.json"
+idle_motion_interval_ms = 9000
+idle_sway_enabled = false
+idle_sway_interval_ms = 900
+idle_sway_intensity = 0.25
+speech_sway_enabled = false
+speech_sway_intensity = 0.45
+speech_sway_update_interval_ms = 160
+
+[live2d.overrides]
+"ParamMouthOpenY" = { role = "mouth.open", min = 0.0, max = 1.0, default = 0.0, safe_amplitude = 1.0, enabled = true}
+"ParamMouthForm" = { role = "mouth.form", min = -2.0, max = 1.0, default = 0.0, safe_amplitude = 1.0, enabled = true}
+
+[game]
+enabled = false
+http_url = ""
+websocket_url = ""
+auth_token = ""
+connect_timeout_sec = 10.0
+forward_bot_replies = false
+forward_inbound_danmaku = false
+allowed_actions = []
+
+[language]
+mode = "english_voice_chinese_subtitle"
+english_system_prompt = "Reply in natural English for spoken output. Keep the same streamer personality, short live-reaction style, and do not mention translation or subtitles. Chinese subtitles will be generated separately."
+
+[language.translation]
+api_provider = "BaiLian"
+model_name = ""
+model_identifier = "qwen-mt-flash"
+enable_thinking = false
+temperature = 0.1
+max_tokens = 800
+timeout_sec = 30.0
+
+[sts2]
+enabled = true
+
+[sts2.commands]
+start_command = "/sts2start"
+stop_command = "/sts2stop"
+status_command = "/sts2status"
+admin_user_ids = []
+drop_non_admin_slash_commands = true
+
+[sts2.mcp]
+transport = "stdio"
+server_command = "uv"
+server_args = ["run", "sts2-mcp-server"]
+# LOCAL: set to your STS2-Agent/mcp_server path
+server_cwd = ""
+streamable_http_url = ""
+sse_url = ""
+api_base_url = "http://127.0.0.1:18080"
+tool_profile = "guided"
+connect_timeout_sec = 10.0
+action_timeout_sec = 30.0
+wait_actionable_timeout_sec = 120.0
+
+[sts2.llm]
+api_provider = "BaiLian"
+model_name = ""
+model_identifier = "qwen3.6-flash"
+enable_thinking = false
+temperature = 0.2
+max_tokens = 1200
+timeout_sec = 60.0
+
+[sts2.narration]
+priority_over_danmaku = true
+action_on_audio_start = true
+require_audio_start = true
+audio_start_timeout_ms = 180000
+max_recent_steps = 8
+
+[sts2.logging]
+enabled = true
+directory = "logs/sts2agent"
+open_window = true
+window_title = "MaiBot STS2-Agent Logs"
+tail_lines = 200
+capture_mcp_stderr = true
+file_prefix = "sts2agent"
+
+[song_request]
+enabled = false
+hard_disable = true
+netease_api_base_url = "https://openncm.music.163.com"
+netease_app_id = ""
+netease_app_secret = ""
+netease_public_key = ""
+netease_private_key = ""
+netease_access_token = ""
+# LOCAL: set to your cache path
+netease_token_cache_path = ""
+netease_device_id = ""
+netease_device_type = "openapi"
+netease_os = "ncmcli"
+netease_app_ver = "0.1.1"
+netease_channel = "ncmcli"
+netease_brand = "ncmcli"
+netease_model = "Windows_x64_cli"
+netease_os_ver = ""
+netease_client_ip = ""
+netease_flow_flag = ""
+netease_cookie = ""
+netease_user_agent = "ncm-0.1.1"
+netease_referer = "https://music.163.com/"
+netease_auto_qr_login_on_unauthorized = true
+netease_qr_login_timeout_sec = 180.0
+netease_qr_poll_interval_sec = 3.0
+console_enabled = false
+console_open_window = true
+console_window_title = "MaiBot Song Requests"
+# LOCAL: set to your console data directory
+console_directory = ""
+netease_search_limit = 5
+netease_song_level = "standard"
+connect_timeout_sec = 10.0
+request_timeout_sec = 120.0
+download_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+max_song_duration_sec = 420
+max_queue_size = 3
+# LOCAL: set to your song request work directory
+work_dir = ""
+# LOCAL: set to your ffmpeg/ffprobe paths
+ffmpeg_command = "ffmpeg"
+ffprobe_command = "ffprobe"
+# LOCAL: set to your demucs separation command
+separation_command_template = ""
+separated_vocals_path_template = "{separation_dir}/htdemucs/{stem_name}/vocals.wav"
+separated_instrumental_path_template = "{separation_dir}/htdemucs/{stem_name}/no_vocals.wav"
+# LOCAL: set to your RVC command
+rvc_command_template = ""
+# LOCAL: set to your RVC model paths
+rvc_model_path = ""
+rvc_index_path = ""
+rvc_pitch = 0
+command_timeout_sec = 1800.0
+wait_prompt_template = "请告知观众稍等，理由是正在检索原曲、拆人声、换声线和重新混音。"
+ready_prompt_template = "点的歌《{song_title}》已经准备好了，马上开唱。"
+failure_prompt_template = "这首歌暂时处理失败了：《{song_title}》。"
+subtitle_template = "正在唱：{song_title}"
+cleanup_successful_tasks = false
+
+[local_voice]
+enabled = false
+speaker_user_id = "local-mic"
+speaker_username = "Local Mic"
+input_device = ""
+engine = "aliyun_rasr"
+rasr_model = "fun-asr-realtime"
+rasr_ws_url = "wss://dashscope.aliyuncs.com/api-ws/v1/inference/"
+rasr_api_key_env = "DASHSCOPE_API_KEY"
+rasr_api_key = ""
+rasr_audio_format = "pcm"
+rasr_language_hint = ""
+rasr_enable_intermediate_result = true
+rasr_enable_punctuation_prediction = true
+rasr_enable_inverse_text_normalization = true
+rasr_max_sentence_silence_ms = 800
+rasr_heartbeat = true
+rasr_route_partials_to_maibot = false
+rasr_speech_noise_threshold = 0.0
+rasr_disfluency_removal_enabled = false
+sample_rate_hz = 16000
+channels = 1
+block_duration_ms = 100
+sherpa_model_type = "paraformer"
+sherpa_encoder = ""
+sherpa_decoder = ""
+sherpa_joiner = ""
+sherpa_tokens = ""
+sherpa_provider = "cpu"
+sherpa_num_threads = 1
+sherpa_model_sample_rate_hz = 16000
+sherpa_feature_dim = 80
+sherpa_decoding_method = "greedy_search"
+sherpa_max_active_paths = 4
+sherpa_hotwords_file = ""
+sherpa_hotwords_score = 1.5
+sherpa_blank_penalty = 0.0
+sherpa_enable_endpoint = false
+stable_emit_min_chars = 1
+sentence_postprocess_enabled = true
+sentence_flush_inactivity_ms = 700
+sentence_force_emit_chars = 16
+sentence_auto_punctuation = true
+speech_vad_enabled = true
+speech_noise_reduction_enabled = true
+speech_vad_start_threshold = 0.018
+speech_vad_noise_ratio = 3.0
+speech_vad_hold_ms = 250
+speech_noise_floor_adaptation = 0.05
+speech_noise_suppression_strength = 0.8
+speech_reset_on_silence = true
+pre_speech_padding_ms = 160
+silence_duration_ms = 650
+min_phrase_duration_ms = 400
+max_phrase_duration_ms = 12000
+speech_threshold = 0.02
+min_transcript_length = 1
+
+[tts]
+enabled = true
+provider = "gpt_sovits_v2"
+base_url = "http://127.0.0.1:9880"
+connect_timeout_sec = 30.0
+text_lang = "zh"
+# LOCAL: set to your reference audio path
+ref_audio_path = ""
+aux_ref_audio_paths = []
+prompt_text = "You want me to get rid of that chat member there are 10,000 other ways to teach you a lesson"
+prompt_lang = "en"
+text_split_method = "cut5"
+top_k = 5
+top_p = 1.0
+temperature = 1.0
+batch_size = 1
+batch_threshold = 0.75
+split_bucket = true
+speed_factor = 1.0
+seed = -1
+parallel_infer = true
+repetition_penalty = 1.35
+amplitude_interval_ms = 50
+amplitude_normalization_enabled = true
+amplitude_noise_floor = 0.015
+amplitude_peak_percentile = 0.95
+amplitude_normalization_gain = 1.0
+audio_playback_enabled = true
+audio_output_device = "CABLE Input"
+audio_output_volume = 1.0
+output_dir = ""
+
+[webui]
+enabled = true
+host = "127.0.0.1"
+port = 18182
+
+[webui.subtitle]
+box_width_px = 960
+box_height_px = 260
+left_px = 72
+bottom_px = 72
+background_color = "rgba(10, 14, 22, 0)"
+font_family = "\"Microsoft YaHei UI\", \"PingFang SC\", sans-serif"
+font_size_px = 34
+text_color = "#F7F8FB"
