@@ -1,6 +1,9 @@
+<details open>
+<summary><b>🇨🇳 中文</b> | <i>点此切换 English ▼</i></summary>
+
 # OpenNeuro — AI 游戏主播
 
-> *一个基于双模型（S1 MiniCPM / S2 DeepSeek）的 AI 直播流 —— 实时捕获弹幕、VAD 情绪驱动、角色人设系统。灵感来自 Neuro-sama。*
+> *一个基于双模型（S1 MiniCPM / S2 DeepSeek）的 AI 直播机器人 —— 实时捕获弹幕、VAD 情绪驱动、角色人设系统。灵感来自 Neuro-sama。*
 
 ---
 
@@ -11,7 +14,7 @@
 - [目录结构](#目录结构)
 - [快速开始](#快速开始)
 - [配置](#配置)
-- [MaiBot Live Hub](#maibot-live-hub)
+- [Live Hub](#live-hub)
 - [人设系统](#人设系统)
 - [情感系统](#情感系统)
 - [记忆系统](#记忆系统)
@@ -25,11 +28,11 @@ OpenNeuro 是一个 AI 直播机器人，专为 Bilibili 等平台设计。它�
 
 ### 核心能力
 
-- **实时弹幕捕获** — 通过内置 Bilibili WebSocket 或 MaiBot Live Hub 并行采集弹幕
+- **实时弹幕捕获** — 通过内置 Bilibili WebSocket 或 Live Hub 并行采集弹幕
 - **双模型架构** — S1（MiniCPM-o 4.5）快速决策 + S2（DeepSeek）深度生成
 - **VAD 情绪系统** — 三维情绪模型（Valence-Arousal-Dominance），20+ 事件触发器，自然衰减
 - **三层 Prompt 体系** — 规则层 + 人设层 + 动态上下文，人设热重载
-- **多记忆力系统** — L1 工作记忆 / L2 短期记忆 / L3 长期记忆（Graphiti 知识图谱）
+- **多级记忆系统** — L1 工作记忆 / L2 短期记忆 / L3 长期记忆（Graphiti 知识图谱）
 - **Electron GUI** — 可视化人设编辑器、日志查看、配置管理
 
 ---
@@ -40,7 +43,7 @@ OpenNeuro 是一个 AI 直播机器人，专为 Bilibili 等平台设计。它�
 ┌─────────────────────────────────────────────────────────────────┐
 │                      用户输入 (弹幕 / 礼物 / 订阅)                  │
 ├──────────────┬──────────────────────────────────────────────────┤
-│  MaiBot Hub  │  Bilibili 直连 (--platform bilibili)               │
+│  Live Hub    │  Bilibili 直连 (--platform bilibili)               │
 │  :18190/ws   │  wss://broadcastlv.chat.bilibili.com/sub           │
 ├──────────────┴──────────────────────────────────────────────────┤
 │                     Unified Message Queue                         │
@@ -91,7 +94,7 @@ OpenNeuro/
 │   ├── models/                    # 模型抽象 (llama.cpp, OpenAI)
 │   ├── observability/             # 指标 / 追踪
 │   ├── platform/                  # 平台适配器
-│   │   ├── maibot_bridge.py       # MaiBot Hub WebSocket 客户端
+│   │   ├── maibot_bridge.py       # Live Hub WebSocket 客户端
 │   │   ├── bilibili.py            # Bilibili 直连适配器
 │   │   ├── twitch.py              # Twitch 适配器
 │   │   └── discord.py             # Discord 适配器
@@ -100,12 +103,12 @@ OpenNeuro/
 │   ├── utils/                     # 工具函数
 │   └── vision/                    # 桌面截图
 │
-├── maibot_live_hub/               # MaiBot Live Hub (弹幕共享中心)
+├── live_hub/                      # 独立弹幕采集中心
 │   ├── src/live_hub/              # Hub Web + WebSocket 服务
-│   ├── plugins/                   # B站直播适配器
-│   ├── config/                    # Hub 配置
-│   ├── start_maibot_live_hub.ps1
-│   └── start_maibot_live_hub_window.cmd
+│   ├── plugins/bilibili_live_adapter/  # B站直播适配器
+│   ├── config/live_hub.toml       # Hub 配置
+│   ├── start_live_hub.ps1         # Hub 启动脚本
+│   └── start_live_hub_window.cmd  # Hub 窗口启动
 │
 ├── gui/                           # Electron + React 前端
 ├── data/                          # 运行时数据 (gitignored)
@@ -163,7 +166,7 @@ cd gui && npm install && cd ..
 ### 启动
 
 ```bash
-# Windows: 一键启动 (MaiBot Hub + GUI + AI Streamer)
+# Windows: 一键启动 (Live Hub + GUI + AI Streamer)
 .\start_live.bat
 
 # PowerShell: 全链路 (Hub + MiniCPM + GUI + B站直连)
@@ -171,7 +174,7 @@ cd gui && npm install && cd ..
 
 # 手动启动
 python run_live.py --platform bilibili    # B站直连
-python run_live.py --platform maibot      # 通过 MaiBot Hub
+python run_live.py --platform maibot      # 通过 Live Hub
 ```
 
 ---
@@ -215,15 +218,15 @@ platforms:             # 平台适配
 
 ---
 
-## MaiBot Live Hub
+## Live Hub
 
-独立运行的 Bilibili 弹幕共享中心，支持多实例同时消费同一直播间弹幕流。
+独立运行的 Bilibili 弹幕采集中心，支持多实例同时消费同一直播间弹幕流。
 
 ### 启动 Hub
 
 ```powershell
-cd maibot_live_hub
-.\start_maibot_live_hub.ps1
+cd live_hub
+.\start_live_hub.ps1
 ```
 
 - **WebSocket**: `ws://127.0.0.1:18190/ws`
@@ -233,7 +236,7 @@ cd maibot_live_hub
 ### 连接模式
 
 ```
-模式 A: MaiBot Hub 中间层
+模式 A: Live Hub 中间层
   B站 → Hub(:18190) → OpenNeuro (maibot_bridge.py)
   优势: 多实例共享, Web UI, 本地注入
 
@@ -298,12 +301,19 @@ python -m uvicorn src.gui_server:app --host 127.0.0.1 --port 9071
 ### 提交前检查
 
 - `data/` 目录及其运行时数据已被 `.gitignore` 排除
-- 本地配置文件 (`maibot_live_hub/plugins/*/config.toml`) 不提交——请参照 `.example` 文件自行配置
+- 本地配置文件 (`live_hub/plugins/*/config.toml`) 不提交——请参照 `.example` 文件自行配置
 - API Key 仅存在 `.env`，不提交
 
 ---
 
----
+## License
+
+MIT
+
+</details>
+
+<details>
+<summary><b>🇬🇧 English</b> | <i>Click for Chinese ▼</i></summary>
 
 # OpenNeuro — AI Game Streamer
 
@@ -315,7 +325,7 @@ OpenNeuro is an AI streaming bot designed for platforms like Bilibili. It captur
 
 ### Core Capabilities
 
-- **Real-time danmaku capture** — via built-in Bilibili WebSocket or MaiBot Live Hub
+- **Real-time danmaku capture** — via built-in Bilibili WebSocket or Live Hub
 - **Dual-model architecture** — S1 (MiniCPM-o 4.5) for fast decisions + S2 (DeepSeek) for deep generation
 - **VAD emotion system** — 3D valence-arousal-dominance with 20+ triggers and natural decay
 - **Layered prompt system** — Rules + Persona + Dynamic context, hot-reloadable
@@ -339,7 +349,7 @@ python run_live.py --platform bilibili  # Direct Bilibili connection
 ## Architecture
 
 ```
-Danmaku → [MaiBot Hub :18190 | Bilibili direct] → Unified Queue
+Danmaku → [Live Hub :18190 | Bilibili direct] → Unified Queue
            ↓
     S1 (MiniCPM): reply/don't/interrupt → direction + confidence
            ↓
@@ -354,17 +364,80 @@ Danmaku → [MaiBot Hub :18190 | Bilibili direct] → Unified Queue
 
 ```
 OpenNeuro/
-├── src/prompts/templates/  # Persona core + S1/S2 rules
-├── src/emotion/            # VAD emotion model
-├── src/memory/             # L1/L2/L3 memory system
-├── src/platform/           # Platform adapters (Bilibili, Twitch, Discord)
-├── maibot_live_hub/        # Standalone danmaku hub
-├── gui/                    # Electron + React frontend
-├── config.yaml             # Main configuration
-├── run_live.py             # Unified entry point
-└── .env.example            # API key template
+├── src/
+│   ├── prompts/templates/    # Persona core + S1/S2 rules
+│   ├── emotion/              # VAD emotion model
+│   ├── memory/               # L1/L2/L3 memory system
+│   ├── platform/             # Platform adapters (Bilibili, Twitch, Discord)
+│   ├── content/              # Cold-start content system
+│   ├── iteration/            # Self-iteration pipeline
+│   ├── models/               # Model clients (llama.cpp, OpenAI)
+│   ├── session/              # Session management
+│   └── vision/               # Desktop screenshot capture
+├── live_hub/                 # Independent danmaku hub
+│   ├── src/live_hub/         # Hub Web + WebSocket server
+│   ├── plugins/              # Bilibili live adapter plugin
+│   ├── config/               # Hub configuration
+│   └── start_live_hub.ps1    # Hub launcher
+├── gui/                      # Electron + React frontend
+├── data/                     # Runtime data (gitignored)
+├── config.yaml               # Main configuration
+├── run_live.py               # Unified entry point
+└── .env.example              # API key template
+```
+
+## Live Hub
+
+A standalone Bilibili danmaku hub supporting multi-instance consumption of the same live room's chat stream.
+
+```powershell
+cd live_hub
+.\start_live_hub.ps1
+```
+
+- **WebSocket**: `ws://127.0.0.1:18190/ws`
+- **HTTP API**: `http://127.0.0.1:18190/api/health`
+- **Web UI**: `http://127.0.0.1:18190/`
+
+### Connection Modes
+
+```
+Mode A: Live Hub relay
+  Bilibili → Hub(:18190) → OpenNeuro
+  Pros: Multi-instance, Web UI, local inject
+
+Mode B: Direct Bilibili
+  Bilibili WebSocket → OpenNeuro
+  Pros: Zero extra processes, low latency
+```
+
+## Persona System
+
+Single source of truth: **`src/prompts/templates/persona_core.md`**
+
+Three-tier extraction (`@s1`, `@s2`, `@both` tags). Hot-reloadable via GUI or API. Default persona: **NewRoad** — a sharp-tongued but warm-hearted AI game streamer.
+
+## Emotion System
+
+VAD 3D model (Valence-Arousal-Dominance) with 20 event triggers. Emotions influence S1 speak threshold and S2 reply style.
+
+## Memory System
+
+| Tier | Type | Capacity | Storage |
+|------|------|----------|---------|
+| L1 Working | Sliding window | Recent N msgs | RAM |
+| L2 Short | Session-scoped | Up to 50 | Session JSON |
+| L3 Long | Knowledge graph | Unlimited | Kuzu (Graphiti) |
+
+## Development
+
+```bash
+pytest tests/
+python -m uvicorn src.gui_server:app --host 127.0.0.1 --port 9071
 ```
 
 ## License
 
 MIT
+
+</details>

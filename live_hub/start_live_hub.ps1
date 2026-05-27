@@ -8,11 +8,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$MaiBotRoot = $PSScriptRoot
-Set-Location -LiteralPath $MaiBotRoot
+$Root = $PSScriptRoot
+Set-Location -LiteralPath $Root
 
 if (-not $Python) {
-    $venvPython = Join-Path $MaiBotRoot ".venv\\Scripts\\python.exe"
+    $venvPython = Join-Path $Root ".venv\\Scripts\\python.exe"
     if (Test-Path -LiteralPath $venvPython) {
         $Python = $venvPython
     } else {
@@ -34,13 +34,13 @@ if ($Verbose) {
     $arguments += "--verbose"
 }
 
-Write-Host "Starting MaiBot Live Hub..." -ForegroundColor Cyan
-Write-Host "  Repo:   $MaiBotRoot"
+Write-Host "Starting Live Hub..." -ForegroundColor Cyan
+Write-Host "  Repo:   $Root"
 Write-Host "  Python: $Python"
 if ($RoomId -gt 0) {
     Write-Host "  Room:   $RoomId"
 } else {
-    Write-Host "  Room:   config/maibot_live_hub.toml -> source adapter config"
+    Write-Host "  Room:   config/live_hub.toml -> source adapter config"
 }
 if ($Port -gt 0) {
     Write-Host "  Port:   $Port"

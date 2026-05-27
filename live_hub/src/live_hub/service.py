@@ -16,8 +16,8 @@ from uuid import uuid4
 
 from aiohttp import WSMsgType, web
 
-from plugins.maibot_bilibili_live_adapter_copy.bilibili_transport import extract_history_events
-from plugins.maibot_bilibili_live_adapter_copy.bilibili_transport import BilibiliDanmakuTransport
+from plugins.bilibili_live_adapter.bilibili_transport import extract_history_events
+from plugins.bilibili_live_adapter.bilibili_transport import BilibiliDanmakuTransport
 
 from .config import ClientIdentityMapping, LiveHubSettings
 
@@ -29,7 +29,9 @@ def _normalize_public_text(event: Mapping[str, Any]) -> str:
     return str(event.get("summary") or event.get("text") or "").strip()
 
 
-def _normalize_public_username(event: Mapping[str, Any], *, default: str = "anonymous") -> str:
+def _normalize_public_username(
+    event: Mapping[str, Any], *, default: str = "anonymous"
+) -> str:
     username = str(event.get("username") or "").strip()
     if username:
         return username
@@ -51,7 +53,14 @@ def _normalize_client_reply_payload(payload: Mapping[str, Any]) -> dict[str, Any
     inner_payload = payload.get("payload")
     if isinstance(inner_payload, Mapping):
         normalized = dict(inner_payload)
-        for key in ("client_id", "bot_name", "text", "room_id", "live_event_type", "route_scope"):
+        for key in (
+            "client_id",
+            "bot_name",
+            "text",
+            "room_id",
+            "live_event_type",
+            "route_scope",
+        ):
             if key not in normalized and key in payload:
                 normalized[key] = payload[key]
         return normalized
@@ -73,7 +82,14 @@ def _normalize_client_speak_payload(payload: Mapping[str, Any]) -> dict[str, Any
     inner_payload = payload.get("payload")
     if isinstance(inner_payload, Mapping):
         normalized = dict(inner_payload)
-        for key in ("client_id", "bot_name", "request_id", "text", "expected_duration_ms", "status"):
+        for key in (
+            "client_id",
+            "bot_name",
+            "request_id",
+            "text",
+            "expected_duration_ms",
+            "status",
+        ):
             if key not in normalized and key in payload:
                 normalized[key] = payload[key]
         return normalized
@@ -99,7 +115,9 @@ def _normalize_public_raw_value(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, Mapping):
-        return {str(key): _normalize_public_raw_value(item) for key, item in value.items()}
+        return {
+            str(key): _normalize_public_raw_value(item) for key, item in value.items()
+        }
     if isinstance(value, (list, tuple, set)):
         return [_normalize_public_raw_value(item) for item in value]
     return str(value)
@@ -114,7 +132,9 @@ def build_local_injected_event(
 ) -> dict[str, Any]:
     normalized_text = str(text or "").strip()
     normalized_username = str(username or "").strip() or "Hub Local"
-    normalized_user_id = _resolve_local_injected_user_id(user_id, username=normalized_username)
+    normalized_user_id = _resolve_local_injected_user_id(
+        user_id, username=normalized_username
+    )
     event_timestamp = time.time() if timestamp is None else float(timestamp)
     event_id = f"hub-local-{uuid4().hex}"
     return {
@@ -146,8 +166,14 @@ def build_client_reply_event(
     normalized_text = str(text or "").strip()
     normalized_client_id = str(client_id or "").strip() or "hub-client"
     normalized_bot_name = str(bot_name or "").strip() or normalized_client_id
-    normalized_forward_user_id = str(forward_user_id or "").strip() or normalized_client_id
-    normalized_forward_username = str(forward_username or "").strip() or normalized_bot_name or normalized_forward_user_id
+    normalized_forward_user_id = (
+        str(forward_user_id or "").strip() or normalized_client_id
+    )
+    normalized_forward_username = (
+        str(forward_username or "").strip()
+        or normalized_bot_name
+        or normalized_forward_user_id
+    )
     event_timestamp = time.time() if timestamp is None else float(timestamp)
     event_id = f"hub-client-reply-{uuid4().hex}"
     raw = {
@@ -240,7 +266,9 @@ class HubRuntimeState:
     current_speaking_request: HubSpeakingRequest | None = None
     speaking_queue: deque[HubSpeakingRequest] = field(default_factory=deque)
 
-    def record_public_event(self, event: Mapping[str, Any], *, origin: str) -> dict[str, Any]:
+    def record_public_event(
+        self, event: Mapping[str, Any], *, origin: str
+    ) -> dict[str, Any]:
         normalized_event_type = str(event.get("type") or "event").strip() or "event"
         timestamp = _normalize_public_timestamp(event.get("timestamp"))
         record = {
@@ -302,10 +330,14 @@ class HubRuntimeState:
             "active_client_count": len(self.active_clients),
             "speaking_pending_count": len(self.speaking_queue),
             "speaking_current_client_id": (
-                self.current_speaking_request.client_id if self.current_speaking_request is not None else None
+                self.current_speaking_request.client_id
+                if self.current_speaking_request is not None
+                else None
             ),
             "speaking_current_request_id": (
-                self.current_speaking_request.request_id if self.current_speaking_request is not None else None
+                self.current_speaking_request.request_id
+                if self.current_speaking_request is not None
+                else None
             ),
         }
 
@@ -324,9 +356,13 @@ class HubRuntimeState:
         if not normalized_client_id:
             return False
         normalized_bot_name = str(bot_name or "").strip() or normalized_client_id
-        normalized_forward_user_id = str(forward_user_id or "").strip() or normalized_client_id
+        normalized_forward_user_id = (
+            str(forward_user_id or "").strip() or normalized_client_id
+        )
         normalized_forward_username = (
-            str(forward_username or "").strip() or normalized_bot_name or normalized_forward_user_id
+            str(forward_username or "").strip()
+            or normalized_bot_name
+            or normalized_forward_user_id
         )
         current = self.active_clients.get(normalized_client_id)
         now = time.time()
@@ -363,8 +399,15 @@ class HubRuntimeState:
         return True
 
     def build_participants_payload(self) -> list[dict[str, Any]]:
-        participants = [presence.to_public_payload() for presence in self.active_clients.values()]
-        participants.sort(key=lambda item: (str(item.get("bot_name") or ""), str(item.get("client_id") or "")))
+        participants = [
+            presence.to_public_payload() for presence in self.active_clients.values()
+        ]
+        participants.sort(
+            key=lambda item: (
+                str(item.get("bot_name") or ""),
+                str(item.get("client_id") or ""),
+            )
+        )
         return participants
 
     def build_speaking_payload(self, *, enabled: bool = True) -> dict[str, Any]:
@@ -410,7 +453,10 @@ class HubRuntimeState:
         ):
             return {"granted": True, "position": 0}
         for index, pending in enumerate(self.speaking_queue):
-            if pending.request_id == normalized_request_id and pending.client_id == normalized_client_id:
+            if (
+                pending.request_id == normalized_request_id
+                and pending.client_id == normalized_client_id
+            ):
                 return {"granted": False, "position": index + 1}
         self.speaking_queue.append(
             HubSpeakingRequest(
@@ -431,7 +477,10 @@ class HubRuntimeState:
         ):
             return {"granted": True, "position": 0}
         for index, pending in enumerate(self.speaking_queue):
-            if pending.request_id == normalized_request_id and pending.client_id == normalized_client_id:
+            if (
+                pending.request_id == normalized_request_id
+                and pending.client_id == normalized_client_id
+            ):
                 return {"granted": False, "position": index + 1}
         return {"granted": False, "position": max(1, len(self.speaking_queue))}
 
@@ -450,7 +499,10 @@ class HubRuntimeState:
         remaining_queue = deque(
             item
             for item in self.speaking_queue
-            if not (item.request_id == normalized_request_id and item.client_id == normalized_client_id)
+            if not (
+                item.request_id == normalized_request_id
+                and item.client_id == normalized_client_id
+            )
         )
         if len(remaining_queue) != len(self.speaking_queue):
             self.speaking_queue = remaining_queue
@@ -465,7 +517,11 @@ class HubRuntimeState:
         active_client_ids: set[str],
         stale_speaker_timeout_sec: float,
     ) -> bool:
-        normalized_active_client_ids = {str(value or "").strip() for value in active_client_ids if str(value or "").strip()}
+        normalized_active_client_ids = {
+            str(value or "").strip()
+            for value in active_client_ids
+            if str(value or "").strip()
+        }
         changed = False
         current = self.current_speaking_request
         now = time.time()
@@ -473,7 +529,10 @@ class HubRuntimeState:
         if current is not None:
             current_is_stale = (
                 current.client_id not in normalized_active_client_ids
-                or (current.granted_at > 0 and now - float(current.granted_at) > stale_timeout_sec)
+                or (
+                    current.granted_at > 0
+                    and now - float(current.granted_at) > stale_timeout_sec
+                )
             )
             if current_is_stale:
                 self.current_speaking_request = None
@@ -489,7 +548,9 @@ class HubRuntimeState:
         if self.current_speaking_request is None:
             queue_before_promote = len(self.speaking_queue)
             self._promote_next_speaking_request()
-            if queue_before_promote != len(self.speaking_queue) or (queue_before_promote > 0 and self.current_speaking_request is not None):
+            if queue_before_promote != len(self.speaking_queue) or (
+                queue_before_promote > 0 and self.current_speaking_request is not None
+            ):
                 changed = True
         return changed
 
@@ -561,7 +622,7 @@ class LiveHubService:
         await self._transport.start()
         self._client_presence_cleanup_task = asyncio.create_task(
             self._run_client_presence_cleanup(),
-            name="maibot_live_hub.client_presence_cleanup",
+            name="live_hub.client_presence_cleanup",
         )
         self._logger.info(
             "Live hub started: "
@@ -595,15 +656,21 @@ class LiveHubService:
         self._app.router.add_post("/api/local-inject", self._handle_local_inject)
         self._app.router.add_post("/api/client/presence", self._handle_client_presence)
         self._app.router.add_post("/api/client/reply", self._handle_client_reply)
-        self._app.router.add_post("/api/client/speak-request", self._handle_client_speak_request)
-        self._app.router.add_post("/api/client/speak-complete", self._handle_client_speak_complete)
+        self._app.router.add_post(
+            "/api/client/speak-request", self._handle_client_speak_request
+        )
+        self._app.router.add_post(
+            "/api/client/speak-complete", self._handle_client_speak_complete
+        )
         self._app.router.add_get("/ws", self._handle_ws)
 
     async def _handle_index(self, request: web.Request) -> web.Response:
         del request
         html = INDEX_HTML.replace("__TITLE__", self._settings.hub.title)
         html = html.replace("__ROOM_ID__", str(self._settings.bilibili.room_id))
-        html = html.replace("__DEFAULT_USERNAME__", self._settings.input.default_username)
+        html = html.replace(
+            "__DEFAULT_USERNAME__", self._settings.input.default_username
+        )
         html = html.replace(
             "__DEFAULT_USER_ID__",
             _preferred_local_inject_form_user_id(self._settings.input.default_user_id),
@@ -617,20 +684,27 @@ class LiveHubService:
         payload["listen_host"] = self._settings.hub.listen_host
         payload["listen_port"] = self._settings.hub.listen_port
         payload["participants"] = self._state.build_participants_payload()
-        payload["speaking"] = self._state.build_speaking_payload(enabled=self._settings.speech.enabled)
+        payload["speaking"] = self._state.build_speaking_payload(
+            enabled=self._settings.speech.enabled
+        )
         return web.json_response(payload)
 
     async def _handle_recent_events(self, request: web.Request) -> web.Response:
         limit_raw = request.query.get("limit", "")
         try:
-            limit = max(1, min(int(limit_raw or self._settings.hub.history_snapshot_limit), 1000))
+            limit = max(
+                1,
+                min(int(limit_raw or self._settings.hub.history_snapshot_limit), 1000),
+            )
         except ValueError:
             limit = self._settings.hub.history_snapshot_limit
         payload = {
             "events": self._state.build_history_snapshot()[-limit:],
             "health": self._state.build_health_payload(),
             "participants": self._state.build_participants_payload(),
-            "speaking": self._state.build_speaking_payload(enabled=self._settings.speech.enabled),
+            "speaking": self._state.build_speaking_payload(
+                enabled=self._settings.speech.enabled
+            ),
         }
         return web.json_response(payload)
 
@@ -638,11 +712,19 @@ class LiveHubService:
         payload = await self._read_payload(request)
         text = str(payload.get("text") or "").strip()
         if not text:
-            return web.json_response({"ok": False, "error": "text is required"}, status=400)
+            return web.json_response(
+                {"ok": False, "error": "text is required"}, status=400
+            )
         if not self._settings.input.enabled:
-            return web.json_response({"ok": False, "error": "local input is disabled"}, status=403)
-        username = str(payload.get("username") or self._settings.input.default_username).strip()
-        user_id = str(payload.get("user_id") or self._settings.input.default_user_id).strip()
+            return web.json_response(
+                {"ok": False, "error": "local input is disabled"}, status=403
+            )
+        username = str(
+            payload.get("username") or self._settings.input.default_username
+        ).strip()
+        user_id = str(
+            payload.get("user_id") or self._settings.input.default_user_id
+        ).strip()
         event = build_local_injected_event(
             text=text,
             username=username,
@@ -654,10 +736,14 @@ class LiveHubService:
     async def _handle_client_presence(self, request: web.Request) -> web.Response:
         payload = _normalize_client_presence_payload(await self._read_payload(request))
         if not self._settings.client_api.enabled:
-            return web.json_response({"ok": False, "error": "client API is disabled"}, status=403)
+            return web.json_response(
+                {"ok": False, "error": "client API is disabled"}, status=403
+            )
         client_id = str(payload.get("client_id") or "").strip()
         if not client_id:
-            return web.json_response({"ok": False, "error": "client_id is required"}, status=400)
+            return web.json_response(
+                {"ok": False, "error": "client_id is required"}, status=400
+            )
         participant = await self._refresh_client_presence(payload)
         return web.json_response(
             {
@@ -665,17 +751,23 @@ class LiveHubService:
                 "participant": participant,
                 "participants": self._state.build_participants_payload(),
                 "health": self._state.build_health_payload(),
-                "speaking": self._state.build_speaking_payload(enabled=self._settings.speech.enabled),
+                "speaking": self._state.build_speaking_payload(
+                    enabled=self._settings.speech.enabled
+                ),
             }
         )
 
     async def _handle_client_reply(self, request: web.Request) -> web.Response:
         payload = _normalize_client_reply_payload(await self._read_payload(request))
         if not self._settings.client_api.enabled:
-            return web.json_response({"ok": False, "error": "client API is disabled"}, status=403)
+            return web.json_response(
+                {"ok": False, "error": "client API is disabled"}, status=403
+            )
         text = str(payload.get("text") or "").strip()
         if not text:
-            return web.json_response({"ok": False, "error": "text is required"}, status=400)
+            return web.json_response(
+                {"ok": False, "error": "text is required"}, status=400
+            )
         participant = await self._refresh_client_presence(payload)
         event = build_client_reply_event(
             client_id=str(payload.get("client_id") or "").strip(),
@@ -691,19 +783,27 @@ class LiveHubService:
     async def _handle_client_speak_request(self, request: web.Request) -> web.Response:
         payload = _normalize_client_speak_payload(await self._read_payload(request))
         if not self._settings.client_api.enabled or not self._settings.speech.enabled:
-            return web.json_response({"ok": False, "error": "client speech API is disabled"}, status=403)
+            return web.json_response(
+                {"ok": False, "error": "client speech API is disabled"}, status=403
+            )
         client_id = str(payload.get("client_id") or "").strip()
         request_id = str(payload.get("request_id") or "").strip()
         if not client_id:
-            return web.json_response({"ok": False, "error": "client_id is required"}, status=400)
+            return web.json_response(
+                {"ok": False, "error": "client_id is required"}, status=400
+            )
         if not request_id:
-            return web.json_response({"ok": False, "error": "request_id is required"}, status=400)
+            return web.json_response(
+                {"ok": False, "error": "request_id is required"}, status=400
+            )
         participant = await self._refresh_client_presence(payload)
         async with self._speech_lock:
             outcome = self._state.request_speaking_turn(
                 request_id=request_id,
                 client_id=client_id,
-                bot_name=str(payload.get("bot_name") or participant.get("bot_name") or client_id).strip(),
+                bot_name=str(
+                    payload.get("bot_name") or participant.get("bot_name") or client_id
+                ).strip(),
                 text=str(payload.get("text") or "").strip(),
                 expected_duration_ms=int(payload.get("expected_duration_ms") or 0),
             )
@@ -716,22 +816,32 @@ class LiveHubService:
                 "participant": participant,
                 "participants": self._state.build_participants_payload(),
                 "health": self._state.build_health_payload(),
-                "speaking": self._state.build_speaking_payload(enabled=self._settings.speech.enabled),
+                "speaking": self._state.build_speaking_payload(
+                    enabled=self._settings.speech.enabled
+                ),
             }
         )
 
     async def _handle_client_speak_complete(self, request: web.Request) -> web.Response:
         payload = _normalize_client_speak_payload(await self._read_payload(request))
         if not self._settings.client_api.enabled or not self._settings.speech.enabled:
-            return web.json_response({"ok": False, "error": "client speech API is disabled"}, status=403)
+            return web.json_response(
+                {"ok": False, "error": "client speech API is disabled"}, status=403
+            )
         client_id = str(payload.get("client_id") or "").strip()
         request_id = str(payload.get("request_id") or "").strip()
         if not client_id:
-            return web.json_response({"ok": False, "error": "client_id is required"}, status=400)
+            return web.json_response(
+                {"ok": False, "error": "client_id is required"}, status=400
+            )
         if not request_id:
-            return web.json_response({"ok": False, "error": "request_id is required"}, status=400)
+            return web.json_response(
+                {"ok": False, "error": "request_id is required"}, status=400
+            )
         async with self._speech_lock:
-            released = self._state.complete_speaking_turn(request_id=request_id, client_id=client_id)
+            released = self._state.complete_speaking_turn(
+                request_id=request_id, client_id=client_id
+            )
         if released:
             await self._broadcast_health()
         return web.json_response(
@@ -740,7 +850,9 @@ class LiveHubService:
                 "released": released,
                 "participants": self._state.build_participants_payload(),
                 "health": self._state.build_health_payload(),
-                "speaking": self._state.build_speaking_payload(enabled=self._settings.speech.enabled),
+                "speaking": self._state.build_speaking_payload(
+                    enabled=self._settings.speech.enabled
+                ),
             }
         )
 
@@ -755,7 +867,9 @@ class LiveHubService:
                 "events": self._state.build_history_snapshot(),
                 "health": self._state.build_health_payload(),
                 "participants": self._state.build_participants_payload(),
-                "speaking": self._state.build_speaking_payload(enabled=self._settings.speech.enabled),
+                "speaking": self._state.build_speaking_payload(
+                    enabled=self._settings.speech.enabled
+                ),
             }
         )
         try:
@@ -763,7 +877,11 @@ class LiveHubService:
                 if message.type == WSMsgType.TEXT:
                     if str(message.data).strip().casefold() == "ping":
                         await ws.send_json({"kind": "pong", "now": time.time()})
-                elif message.type in {WSMsgType.ERROR, WSMsgType.CLOSE, WSMsgType.CLOSED}:
+                elif message.type in {
+                    WSMsgType.ERROR,
+                    WSMsgType.CLOSE,
+                    WSMsgType.CLOSED,
+                }:
                     break
         finally:
             async with self._subscriber_lock:
@@ -783,7 +901,9 @@ class LiveHubService:
         self._state.record_connection_state(connected=False)
         await self._broadcast_health()
 
-    async def publish_event(self, event: Mapping[str, Any], *, origin: str) -> dict[str, Any]:
+    async def publish_event(
+        self, event: Mapping[str, Any], *, origin: str
+    ) -> dict[str, Any]:
         record = self._state.record_public_event(event, origin=origin)
         await self._broadcast_json(
             {
@@ -791,7 +911,9 @@ class LiveHubService:
                 "event": record,
                 "health": self._state.build_health_payload(),
                 "participants": self._state.build_participants_payload(),
-                "speaking": self._state.build_speaking_payload(enabled=self._settings.speech.enabled),
+                "speaking": self._state.build_speaking_payload(
+                    enabled=self._settings.speech.enabled
+                ),
             }
         )
         if origin == "bilibili":
@@ -810,10 +932,14 @@ class LiveHubService:
         events = extract_history_events(payload)
         if not events:
             return
-        events = sorted(events, key=lambda item: _normalize_public_timestamp(item.get("timestamp")))[-limit:]
+        events = sorted(
+            events, key=lambda item: _normalize_public_timestamp(item.get("timestamp"))
+        )[-limit:]
         for event in events:
             self._state.record_public_event(event, origin="bilibili")
-        self._logger.info(f"Preloaded {len(events)} recent history event(s) into the hub view.")
+        self._logger.info(
+            f"Preloaded {len(events)} recent history event(s) into the hub view."
+        )
 
     async def _fetch_history_payload_for_preload(self) -> Mapping[str, Any] | None:
         ensure_session = getattr(self._transport, "_ensure_session", None)
@@ -828,9 +954,13 @@ class LiveHubService:
             return None
         return payload if isinstance(payload, Mapping) else None
 
-    async def _refresh_client_presence(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    async def _refresh_client_presence(
+        self, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
         client_id = str(payload.get("client_id") or "").strip()
-        bot_name = str(payload.get("bot_name") or "").strip() or client_id or "hub-client"
+        bot_name = (
+            str(payload.get("bot_name") or "").strip() or client_id or "hub-client"
+        )
         mapping = self._resolve_client_identity_mapping(client_id)
         forward_user_id = (
             str(mapping.forward_user_id or "").strip()
@@ -871,7 +1001,9 @@ class LiveHubService:
         normalized_client_id = str(client_id or "").strip()
         if not normalized_client_id:
             return ClientIdentityMapping()
-        return self._settings.client_mappings.get(normalized_client_id, ClientIdentityMapping())
+        return self._settings.client_mappings.get(
+            normalized_client_id, ClientIdentityMapping()
+        )
 
     async def _run_client_presence_cleanup(self) -> None:
         ttl_sec = max(3.0, float(self._settings.client_api.presence_ttl_sec or 30))
@@ -882,7 +1014,9 @@ class LiveHubService:
             async with self._speech_lock:
                 speaking_changed = self._state.prune_stale_speaking_requests(
                     active_client_ids=set(self._state.active_clients),
-                    stale_speaker_timeout_sec=float(self._settings.speech.stale_speaker_timeout_sec or 180),
+                    stale_speaker_timeout_sec=float(
+                        self._settings.speech.stale_speaker_timeout_sec or 180
+                    ),
                 )
             if clients_changed or speaking_changed:
                 await self._broadcast_health()
@@ -893,7 +1027,9 @@ class LiveHubService:
                 "kind": "health",
                 "health": self._state.build_health_payload(),
                 "participants": self._state.build_participants_payload(),
-                "speaking": self._state.build_speaking_payload(enabled=self._settings.speech.enabled),
+                "speaking": self._state.build_speaking_payload(
+                    enabled=self._settings.speech.enabled
+                ),
             }
         )
 
@@ -932,7 +1068,10 @@ class LiveHubService:
         if content_type == "application/json":
             payload = await request.json()
             return dict(payload) if isinstance(payload, Mapping) else {}
-        if content_type == "application/x-www-form-urlencoded" or content_type.startswith("multipart/"):
+        if (
+            content_type == "application/x-www-form-urlencoded"
+            or content_type.startswith("multipart/")
+        ):
             form = await request.post()
             return dict(form)
         try:

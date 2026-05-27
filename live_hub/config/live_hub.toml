@@ -1,8 +1,8 @@
 [hub]
 listen_host = "127.0.0.1"
 listen_port = 18190
-title = "MaiBot Live Hub"
-source_adapter_config = "plugins/maibot_bilibili_live_adapter_copy/config.toml"
+title = "Live Hub"
+source_adapter_config = "plugins/bilibili_live_adapter/config.toml"
 recent_events_limit = 400
 history_snapshot_limit = 200
 preload_history_on_startup = true

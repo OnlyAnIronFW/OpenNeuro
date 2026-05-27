@@ -11,12 +11,14 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback.
     import tomli as tomllib  # type: ignore[no-redef]
 
-from plugins.maibot_bilibili_live_adapter_copy.config import BilibiliConfig, LiveAdapterSettings
+from plugins.bilibili_live_adapter.config import BilibiliConfig, LiveAdapterSettings
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "maibot_live_hub.toml"
-DEFAULT_SOURCE_ADAPTER_CONFIG = PROJECT_ROOT / "plugins" / "maibot_bilibili_live_adapter_copy" / "config.toml"
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "live_hub.toml"
+DEFAULT_SOURCE_ADAPTER_CONFIG = (
+    PROJECT_ROOT / "plugins" / "bilibili_live_adapter" / "config.toml"
+)
 
 
 def _normalize_text(value: Any, default: str) -> str:
@@ -49,7 +51,7 @@ def _normalize_boolean(value: Any, default: bool) -> bool:
 class HubServerConfig:
     listen_host: str = "127.0.0.1"
     listen_port: int = 18190
-    title: str = "MaiBot Live Hub"
+    title: str = "Live Hub"
     recent_events_limit: int = 400
     history_snapshot_limit: int = 200
     preload_history_on_startup: bool = True
@@ -100,12 +102,17 @@ class LiveHubSettings:
     ) -> "LiveHubSettings":
         updated = self
         if room_id > 0:
-            updated = replace(updated, bilibili=updated.bilibili.model_copy(update={"room_id": room_id}))
+            updated = replace(
+                updated,
+                bilibili=updated.bilibili.model_copy(update={"room_id": room_id}),
+            )
         if listen_host or listen_port > 0:
             updated_hub = replace(
                 updated.hub,
                 listen_host=_normalize_text(listen_host, updated.hub.listen_host),
-                listen_port=_normalize_positive_int(listen_port, updated.hub.listen_port),
+                listen_port=_normalize_positive_int(
+                    listen_port, updated.hub.listen_port
+                ),
             )
             updated = replace(updated, hub=updated_hub)
         return updated
@@ -145,7 +152,9 @@ def load_live_hub_settings(path: Path = DEFAULT_CONFIG_PATH) -> LiveHubSettings:
     speech_raw = dict(raw.get("speech") or {})
     bilibili_overrides = dict(raw.get("bilibili") or {})
 
-    source_adapter_config = _resolve_path(hub_raw.get("source_adapter_config"), relative_to=config_path.parent)
+    source_adapter_config = _resolve_path(
+        hub_raw.get("source_adapter_config"), relative_to=config_path.parent
+    )
     source_settings = _load_source_adapter_settings(source_adapter_config)
     base_bilibili = source_settings.bilibili
     if bilibili_overrides:
@@ -154,24 +163,38 @@ def load_live_hub_settings(path: Path = DEFAULT_CONFIG_PATH) -> LiveHubSettings:
     hub = HubServerConfig(
         listen_host=_normalize_text(hub_raw.get("listen_host"), "127.0.0.1"),
         listen_port=_normalize_positive_int(hub_raw.get("listen_port"), 18190),
-        title=_normalize_text(hub_raw.get("title"), "MaiBot Live Hub"),
-        recent_events_limit=_normalize_positive_int(hub_raw.get("recent_events_limit"), 400),
-        history_snapshot_limit=_normalize_positive_int(hub_raw.get("history_snapshot_limit"), 200),
-        preload_history_on_startup=_normalize_boolean(hub_raw.get("preload_history_on_startup"), True),
-        preload_history_limit=_normalize_positive_int(hub_raw.get("preload_history_limit"), 20),
+        title=_normalize_text(hub_raw.get("title"), "Live Hub"),
+        recent_events_limit=_normalize_positive_int(
+            hub_raw.get("recent_events_limit"), 400
+        ),
+        history_snapshot_limit=_normalize_positive_int(
+            hub_raw.get("history_snapshot_limit"), 200
+        ),
+        preload_history_on_startup=_normalize_boolean(
+            hub_raw.get("preload_history_on_startup"), True
+        ),
+        preload_history_limit=_normalize_positive_int(
+            hub_raw.get("preload_history_limit"), 20
+        ),
     )
     local_input = LocalInputConfig(
         enabled=_normalize_boolean(input_raw.get("enabled"), True),
-        default_username=_normalize_text(input_raw.get("default_username"), "Hub Local"),
+        default_username=_normalize_text(
+            input_raw.get("default_username"), "Hub Local"
+        ),
         default_user_id=_normalize_text(input_raw.get("default_user_id"), "hub-local"),
     )
     client_api = ClientApiConfig(
         enabled=_normalize_boolean(client_api_raw.get("enabled"), True),
-        presence_ttl_sec=_normalize_positive_int(client_api_raw.get("presence_ttl_sec"), 30),
+        presence_ttl_sec=_normalize_positive_int(
+            client_api_raw.get("presence_ttl_sec"), 30
+        ),
     )
     speech = SpeechCoordinationConfig(
         enabled=_normalize_boolean(speech_raw.get("enabled"), True),
-        stale_speaker_timeout_sec=_normalize_positive_int(speech_raw.get("stale_speaker_timeout_sec"), 180),
+        stale_speaker_timeout_sec=_normalize_positive_int(
+            speech_raw.get("stale_speaker_timeout_sec"), 180
+        ),
     )
     client_mappings_raw = dict(raw.get("clients") or {})
     client_mappings: dict[str, ClientIdentityMapping] = {}

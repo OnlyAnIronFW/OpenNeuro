@@ -1,15 +1,15 @@
 @echo off
 cd /d F:\OpenNeuro
 set "HUB_URL=http://127.0.0.1:18190"
-set "HUB_SCRIPT=maibot_live_hub\start_maibot_live_hub.ps1"
+set "HUB_SCRIPT=live_hub\start_live_hub.ps1"
 
 REM ==========================================
-REM 1. MaiBot Live Hub
+REM 1. Live Hub
 REM ==========================================
 curl -s -o NUL %HUB_URL%/api/health 2>nul
 if %errorlevel% neq 0 (
-    echo [1/3] Starting MaiBot Live Hub...
-    start "MaiBot-Live-Hub" powershell -NoExit -ExecutionPolicy Bypass -File "%HUB_SCRIPT%"
+    echo [1/3] Starting Live Hub...
+    start "Live-Hub" powershell -NoExit -ExecutionPolicy Bypass -File "%HUB_SCRIPT%"
     echo   Waiting for hub to be ready...
     :wait_hub
     timeout /t 2 /nobreak >nul
@@ -17,7 +17,7 @@ if %errorlevel% neq 0 (
     if %errorlevel% neq 0 goto wait_hub
     echo   Hub ready: %HUB_URL%
 ) else (
-    echo [1/3] MaiBot Live Hub already running
+    echo [1/3] Live Hub already running
 )
 
 REM ==========================================

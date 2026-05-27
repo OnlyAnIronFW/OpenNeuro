@@ -28,11 +28,11 @@ data/recordings/
 logs/
 
 # ═══════════════════════════════════════════
-# MaiBot Live Hub — 本地配置 (保留 .example 模板)
+# Live Hub — 本地配置 (保留 .example 模板)
 # ═══════════════════════════════════════════
-maibot_live_hub/plugins/*/config.toml
-maibot_live_hub/*.log
-maibot_live_hub/tmp_*
+live_hub/plugins/*/config.toml
+live_hub/*.log
+live_hub/tmp_*
 
 # ═══════════════════════════════════════════
 # IDE / 工具 / 缓存

@@ -14,7 +14,7 @@ from .service import ConsoleHubLogger, LiveHubService
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Standalone Bilibili live hub for MaiBot multi-instance experiments.",
+        description="Standalone Bilibili live hub.",
     )
     parser.add_argument(
         "--config",

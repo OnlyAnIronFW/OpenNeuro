@@ -11,14 +11,14 @@ Write-Host ""
 
 # API key loaded from .env via python-dotenv in run_live.py
 
-# 1. MaiBot Live Hub
+# 1. Live Hub
 try {
     $null = Invoke-WebRequest -Uri "$HubUrl/api/health" -TimeoutSec 2
-    Write-Host "[1/4] MaiBot Live Hub 已在运行 ($HubUrl)" -ForegroundColor Green
+    Write-Host "[1/4] Live Hub 已在运行 ($HubUrl)" -ForegroundColor Green
 } catch {
-    Write-Host "[1/4] 启动 MaiBot Live Hub..." -ForegroundColor Yellow
+    Write-Host "[1/4] 启动 Live Hub..." -ForegroundColor Yellow
     Start-Process -FilePath "powershell" `
-        -ArgumentList "-NoExit","-ExecutionPolicy","Bypass","-File","maibot_live_hub\start_maibot_live_hub.ps1" `
+        -ArgumentList "-NoExit","-ExecutionPolicy","Bypass","-File","live_hub\start_live_hub.ps1" `
         -WindowStyle Minimized
     Write-Host "  等待 Hub 就绪..." -ForegroundColor Yellow
     $hubReady = $false

@@ -90,13 +90,20 @@ class SongRequestConsoleSession:
         with self._lock:
             if self._file is None:
                 return
-            self.update_state({"service_active": False, "last_event": "console session stopped"})
+            self.update_state(
+                {"service_active": False, "last_event": "console session stopped"}
+            )
             self.info("Song request console session stopping")
             self._file.close()
             self._file = None
 
     def open_window(self) -> None:
-        if self._window_started or self.log_path is None or self.state_path is None or self.command_dir is None:
+        if (
+            self._window_started
+            or self.log_path is None
+            or self.state_path is None
+            or self.command_dir is None
+        ):
             return
         self._window_started = True
         if sys.platform != "win32":
@@ -107,7 +114,7 @@ class SongRequestConsoleSession:
         args = [
             sys.executable,
             "-m",
-            "plugins.maibot_bilibili_live_adapter_copy.song_request_console",
+            "plugins.bilibili_live_adapter.song_request_console",
             "--window",
             "--log-path",
             str(self.log_path),
@@ -125,7 +132,9 @@ class SongRequestConsoleSession:
                 creationflags=creationflags,
                 close_fds=True,
             )
-            self.info(f"Song request console window opened: pid={getattr(self._window_process, 'pid', '')}")
+            self.info(
+                f"Song request console window opened: pid={getattr(self._window_process, 'pid', '')}"
+            )
         except Exception as exc:
             self.exception(f"Failed to open song request console window: {exc}")
 
@@ -173,11 +182,17 @@ class SongRequestConsoleSession:
             **dict(payload or {}),
         }
         file_path = self.command_dir / f"{time.time_ns()}-{command_payload['id']}.json"
-        file_path.write_text(json.dumps(command_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        file_path.write_text(
+            json.dumps(command_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         return file_path
 
     def consume_commands(self) -> list[dict[str, Any]]:
-        if not self.settings.console_enabled or self.command_dir is None or not self.command_dir.exists():
+        if (
+            not self.settings.console_enabled
+            or self.command_dir is None
+            or not self.command_dir.exists()
+        ):
             return []
         commands: list[dict[str, Any]] = []
         for path in sorted(self.command_dir.glob("*.json")):
@@ -269,9 +284,15 @@ def _print_status_snapshot(state: Mapping[str, Any]) -> None:
     print(f"  service_active: {bool(state.get('service_active'))}")
     print(f"  pending_count: {int(state.get('pending_count') or 0)}")
     print(f"  playback_active: {bool(state.get('playback_active'))}")
-    print(f"  current_song_title: {str(state.get('current_song_title') or '').strip() or '-'}")
-    print(f"  current_song_keyword: {str(state.get('current_song_keyword') or '').strip() or '-'}")
-    print(f"  current_request_id: {str(state.get('current_request_id') or '').strip() or '-'}")
+    print(
+        f"  current_song_title: {str(state.get('current_song_title') or '').strip() or '-'}"
+    )
+    print(
+        f"  current_song_keyword: {str(state.get('current_song_keyword') or '').strip() or '-'}"
+    )
+    print(
+        f"  current_request_id: {str(state.get('current_request_id') or '').strip() or '-'}"
+    )
     print(f"  last_error: {str(state.get('last_error') or '').strip() or '-'}")
     print(f"  last_event: {str(state.get('last_event') or '').strip() or '-'}")
     print(f"  updated_at: {str(state.get('updated_at') or '').strip() or '-'}")
@@ -290,12 +311,16 @@ def _print_qr_banner(url: str) -> None:
         qr.make(fit=True)
         qr.print_ascii(invert=True)
     else:
-        print("[Install the optional 'qrcode' package to render an ASCII QR image here.]")
+        print(
+            "[Install the optional 'qrcode' package to render an ASCII QR image here.]"
+        )
     print(normalized)
     print("")
 
 
-def _tail_log_worker(log_path: Path, stop_event: threading.Event, print_lock: threading.Lock) -> None:
+def _tail_log_worker(
+    log_path: Path, stop_event: threading.Event, print_lock: threading.Lock
+) -> None:
     position = 0
     while not stop_event.is_set():
         if not log_path.exists():
@@ -322,7 +347,9 @@ def _tail_log_worker(log_path: Path, stop_event: threading.Event, print_lock: th
         stop_event.wait(0.25)
 
 
-def _watch_state_worker(state_path: Path, stop_event: threading.Event, print_lock: threading.Lock) -> None:
+def _watch_state_worker(
+    state_path: Path, stop_event: threading.Event, print_lock: threading.Lock
+) -> None:
     last_signature: tuple[Any, ...] | None = None
     last_qr_url = ""
     while not stop_event.is_set():
@@ -402,7 +429,9 @@ def run_song_request_console_window(
             elif command == "status":
                 _print_status_snapshot(_load_state(state_path))
             elif command == "showqr":
-                _print_qr_banner(str(_load_state(state_path).get("last_qr_url") or "").strip())
+                _print_qr_banner(
+                    str(_load_state(state_path).get("last_qr_url") or "").strip()
+                )
             elif command == "login":
                 command_path = command_dir / f"{time.time_ns()}-{uuid4().hex}.json"
                 command_path.write_text(
@@ -433,11 +462,25 @@ def run_song_request_console_window(
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="MaiBot song-request console window")
-    parser.add_argument("--window", action="store_true", help="Run the interactive song-request console window")
-    parser.add_argument("--log-path", default="", help="Absolute path to the song-request log file")
-    parser.add_argument("--state-path", default="", help="Absolute path to the song-request state file")
-    parser.add_argument("--command-dir", default="", help="Absolute path to the song-request command directory")
-    parser.add_argument("--title", default="MaiBot Song Requests", help="Console window title")
+    parser.add_argument(
+        "--window",
+        action="store_true",
+        help="Run the interactive song-request console window",
+    )
+    parser.add_argument(
+        "--log-path", default="", help="Absolute path to the song-request log file"
+    )
+    parser.add_argument(
+        "--state-path", default="", help="Absolute path to the song-request state file"
+    )
+    parser.add_argument(
+        "--command-dir",
+        default="",
+        help="Absolute path to the song-request command directory",
+    )
+    parser.add_argument(
+        "--title", default="MaiBot Song Requests", help="Console window title"
+    )
     return parser.parse_args(argv)
 
 
