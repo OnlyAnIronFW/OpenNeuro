@@ -66,4 +66,6 @@ src/avatar/__pycache__/
 dataset/**/*.wav
 dataset/**/*.mp3
 dataset/**/*.ogg
+dataset/**/desktop.ini
+dataset/**/Thumbs.db
 checkpoints/

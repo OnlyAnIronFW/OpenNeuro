@@ -55,36 +55,37 @@ Roxy WAV 文件
 # 1. 预处理
 python scripts/prepare_voice_dataset.py --format jsonl
 
-# 2. 训练 (~24GB VRAM for LoRA)
-python scripts/train_voice_roxy.py
+# 2. 训练 (~24GB VRAM for LoRA, RTX 2080 Ti 11.8GB 足够)
+.\start_train_roxy.bat
 
-# 3. 推理测试
-python scripts/train_voice_roxy.py --inference \
-  --text "初めまして、私の名前はロキシーです。" \
-  --checkpoint checkpoints/roxy_tts/checkpoint-final
+# 3. 合并 LoRA → GGUF (训练完成后)
+python scripts/merge_roxy_tts.py
+
+# 4. 重启 llama-server 即可使用 Roxy 音色
 ```
 
-### 配置 (train_voice_roxy.py 内)
+### 合并流程详解
 
-```python
-lora_r = 16           # LoRA rank
-lora_alpha = 32        # LoRA alpha
-learning_rate = 5e-5   # 学习率
-num_epochs = 30        # 训练轮数 (~20min 数据)
-batch_size = 2         # 批大小
-bf16 = True            # 混合精度
+训练产出 LoRA adapter → 合并到 MiniCPMTTS 权重 → 转 GGUF → 替换 `MiniCPM-o-4_5-tts-F16.gguf`
+
 ```
-
-### 训练完成后
-
-微调后的模型替代 MiniCPM-o 的默认语音, 所有 `run_live.py` / `start_live.ps1` 中的 TTS 调用自动使用 Roxy 音色, 无需修改任何代码。
+checkpoints/roxy_tts/checkpoint-300/  (LoRA adapter)
+    ↓ merge_lora_to_base()
+checkpoints/roxy_tts/merged/tts_merged.safetensors  (FP16)
+    ↓ convert_to_gguf() [需要 llama.cpp convert_hf_to_gguf.py]
+checkpoints/roxy_tts/merged/MiniCPM-o-4_5-tts-F16-Roxy.gguf
+    ↓ backup_and_replace() → F:\llm\models\tts\
+MiniCPM-o-4_5-tts-F16.gguf  (替换原文件, 旧文件自动备份)
+```
 
 ### 文件清单
 
 | 文件 | 说明 |
 |------|------|
-| `prepare_voice_dataset.py` | 数据集预处理 (→ JSONL for training) |
-| `train_voice_roxy.py` | MiniCPM-o 内置 TTS LoRA 微调脚本 |
+| `prepare_voice_dataset.py` | 数据集预处理 (→ JSONL) |
+| `train_voice_roxy.py` | MiniCPM-o 内置 TTS LoRA 微调 |
+| `merge_roxy_tts.py` | LoRA → safetensors → GGUF 合并导出 |
+| `../start_train_roxy.bat` | 一键启动训练 |
 
 ---
 
