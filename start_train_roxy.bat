@@ -1,14 +1,15 @@
 @echo off
 cd /d F:\OpenNeuro
-set "HF_DIR=%USERPROFILE%\.cache\huggingface\hub\models--openbmb--MiniCPM-o-4_5"
+
+set "HF_SNAPSHOTS=%USERPROFILE%\.cache\huggingface\hub\models--openbmb--MiniCPM-o-4_5\snapshots"
 
 REM ────────────────────────────────────────
-REM 1. 检查/下载模型 (仅 TTS 部分, ~3GB)
+REM 1. Download TTS weights (~3GB, one-time)
 REM ────────────────────────────────────────
-if exist "%HF_DIR%\snapshots" (
-    echo [1/3] Model already cached
+if exist "%HF_SNAPSHOTS%\*\model-00004-of-00004.safetensors" (
+    echo [1/3] TTS model already cached
 ) else (
-    echo [1/3] Downloading MiniCPM-o TTS weights (~3GB, one-time)...
+    echo [1/3] Downloading TTS shard + config (~3GB, one-time)...
     huggingface-cli download openbmb/MiniCPM-o-4_5 ^
         model-00004-of-00004.safetensors ^
         model.safetensors.index.json ^
@@ -26,36 +27,35 @@ if exist "%HF_DIR%\snapshots" (
         merges.txt ^
         added_tokens.json ^
         generation_config.json ^
-        preprocessor_config.json ^
-        --local-dir "%HF_DIR%/snapshots/main"
+        preprocessor_config.json
+
     if %errorlevel% neq 0 (
-        echo FAILED to download model. Check network.
+        echo.
+        echo DOWNLOAD FAILED. Check network or use: set HF_ENDPOINT=https://hf-mirror.com
         pause
         exit /b 1
     )
+    echo   Done.
 )
 
 REM ────────────────────────────────────────
-REM 2. 预处理数据集
+REM 2. Prepare dataset
 REM ────────────────────────────────────────
 echo.
 echo [2/3] Preparing dataset...
 python scripts/prepare_voice_dataset.py --format jsonl
 
 REM ────────────────────────────────────────
-REM 3. 启动训练
+REM 3. Train
 REM ────────────────────────────────────────
 echo.
 echo [3/3] Starting training...
 echo ============================================================
 echo   Roxy TTS Fine-Tuning
-echo   Model:  MiniCPM-o-4_5 TTS decoder (300M params)
-echo   GPU:    RTX 2080 Ti (11.8 GB)
-echo   Data:   239 samples, ~20 min
-echo   Expected: 30-60 min
+echo   Model:  MiniCPMTTS ^(300M params, LoRA^)
+echo   GPU:    RTX 2080 Ti ^(11.8 GB^)
+echo   Time:   30-60 min
 echo ============================================================
 echo.
-
 python scripts/train_voice_roxy.py
-
 pause
