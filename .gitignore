@@ -59,3 +59,11 @@ assets/avatars/*.vrm
 assets/avatars/*.vrm_profile.json
 assets/avatars/*/avatar_prompt.txt
 src/avatar/__pycache__/
+
+# ═══════════════════════════════════════════
+# 训练数据 — 音频/模型文件 (本地使用)
+# ═══════════════════════════════════════════
+dataset/**/*.wav
+dataset/**/*.mp3
+dataset/**/*.ogg
+checkpoints/
