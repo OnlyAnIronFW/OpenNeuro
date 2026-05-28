@@ -1,0 +1,11 @@
+{
+  "dataset": "Roxy voice timbre",
+  "total_files": 239,
+  "valid": 239,
+  "total_duration_sec": 1196.7,
+  "total_duration_min": 19.9,
+  "avg_duration_sec": 5.0,
+  "sample_rate": 32000,
+  "language": "ja",
+  "filename_text": true
+}

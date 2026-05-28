@@ -1,63 +1,44 @@
 """
-Roxy 音色迁移 — MiniCPM-o 4.5 内置 TTS 模块 LoRA 微调 (Standalone)
+Roxy 音色迁移 — MiniCPM-o 4.5 内置 TTS 模块 LoRA 微调 (Real Tokenizer)
 
-直接加载 MiniCPMTTS 模块和 tts.* 权重, 无需下载完整 20GB 模型。
-仅需: model-00004-of-00004.safetensors (2.87GB) + 配置文件 (~10MB)
+真实训练: MiniCPMOProcessor (text tokenizer) + Token2wav (S3 audio encoder)
 """
 
-import argparse
-import json
-import logging
-import os
-import sys
+import argparse, json, logging, os, sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-
-import torch
-import torch.nn.functional as F
+import torch, torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
-
-# ── Config ───────────────────────────────────────────────
+import numpy as np
 
 
 @dataclass
 class TTSFineTuneConfig:
-    # Model paths
     hf_cache_dir: str = os.path.expandvars(
         r"%USERPROFILE%\.cache\huggingface\hub\models--openbmb--MiniCPM-o-4_5\snapshots"
     )
     tts_shard: str = "model-00004-of-00004.safetensors"
-
-    # Dataset
     dataset_jsonl: str = r"F:\OpenNeuro\dataset\tts\Roxy_processed\jsonl\dataset.jsonl"
     speaker_name: str = "Roxy"
     language: str = "ja"
     val_split: float = 0.05
     seed: int = 42
-
-    # LoRA
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
     lora_target_modules: str = "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
-
-    # Training
-    output_dir: str = r"F:\OpenNeuro\checkpoints\roxy_tts"
+    output_dir: str = r"F:\OpenNeuro\checkpoints\roxy_tts_v2"
     num_epochs: int = 30
-    batch_size: int = 2
+    batch_size: int = 1
     gradient_accumulation_steps: int = 4
     learning_rate: float = 5e-5
     warmup_steps: int = 50
     weight_decay: float = 0.01
     max_grad_norm: float = 1.0
     save_steps: int = 100
-    logging_steps: int = 10
-    eval_steps: int = 100
+    logging_steps: int = 5
     bf16: bool = True
-
-
-# ── Dataset ──────────────────────────────────────────────
 
 
 class RoxyTTSDataset(Dataset):
@@ -82,229 +63,289 @@ class RoxyTTSDataset(Dataset):
         }
 
 
-def collate_fn(batch):
-    return batch
+def collate_fn(b):
+    return b
 
 
-def split_dataset(dataset, val_ratio, seed):
+def split_dataset(d, r, s):
     import random
 
-    rng = random.Random(seed)
-    idxs = list(range(len(dataset)))
+    rng = random.Random(s)
+    idxs = list(range(len(d)))
     rng.shuffle(idxs)
-    n_val = max(1, int(len(idxs) * val_ratio))
-    return [dataset[i] for i in idxs[n_val:]], [dataset[i] for i in idxs[:n_val]]
+    n = max(1, int(len(idxs) * r))
+    return [d[i] for i in idxs[n:]], [d[i] for i in idxs[:n]]
 
 
-# ── Logging ──────────────────────────────────────────────
-
-
-def setup_logging(output_dir: Path) -> logging.Logger:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("roxy_tts")
-    logger.setLevel(logging.INFO)
+def setup_logging(od: Path) -> logging.Logger:
+    od.mkdir(parents=True, exist_ok=True)
+    l = logging.getLogger("roxy_tts")
+    l.setLevel(logging.INFO)
     h = logging.StreamHandler()
     h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-    logger.addHandler(h)
-    fh = logging.FileHandler(output_dir / "train.log", encoding="utf-8")
+    l.addHandler(h)
+    fh = logging.FileHandler(od / "train.log", encoding="utf-8")
     fh.setFormatter(h.formatter)
-    logger.addHandler(fh)
-    return logger
+    l.addHandler(fh)
+    return l
 
 
 # ══════════════════════════════════════════════════════════
-#  Standalone TTS Module Loader
+#  Model + Tokenizer Loading
 # ══════════════════════════════════════════════════════════
 
 
 def find_model_cache(config: TTSFineTuneConfig, logger: logging.Logger) -> Path:
     cache = Path(config.hf_cache_dir)
-    if not cache.exists():
-        logger.error(f"Model cache not found: {cache}")
-        logger.info("Run: .\\start_train_roxy.bat  (downloads ~3GB)")
-        sys.exit(1)
     snapshots = sorted(
         [d for d in cache.iterdir() if d.is_dir()],
         key=lambda d: d.stat().st_mtime,
         reverse=True,
     )
-    if not snapshots:
-        logger.error(f"No snapshots in {cache}")
-        sys.exit(1)
     return snapshots[0]
 
 
 def load_tts_standalone(
     model_dir: Path, config: TTSFineTuneConfig, logger: logging.Logger
 ):
-    model_dir_str = str(model_dir)
-    if model_dir_str not in sys.path:
-        sys.path.insert(0, model_dir_str)
+    """Standalone TTS loading with patched imports."""
+    import shutil
 
-    # Import model code from cache
-    try:
-        from configuration_minicpmo import MiniCPMOConfig
-    except ImportError:
-        import shutil
-
-        for f in [
-            "configuration_minicpmo.py",
-            "modeling_minicpmo.py",
-            "modeling_navit_siglip.py",
-            "processing_minicpmo.py",
-            "tokenization_minicpmo_fast.py",
-            "utils.py",
-        ]:
-            if (model_dir / f).exists() and not (Path.cwd() / f).exists():
-                shutil.copy2(model_dir / f, Path.cwd() / f)
+    pkg_dir = Path.cwd() / "_minicpm_tts"
+    pkg_dir.mkdir(exist_ok=True)
+    for f in [
+        "configuration_minicpmo.py",
+        "modeling_navit_siglip.py",
+        "modeling_minicpmo.py",
+        "utils.py",
+    ]:
+        src = model_dir / f
+        if src.exists():
+            content = src.read_text(encoding="utf-8")
+            for rel in [
+                ".configuration_minicpmo",
+                ".modeling_navit_siglip",
+                ".utils",
+                ".processing_minicpmo",
+            ]:
+                content = content.replace(f"from {rel}", f"from _minicpm_tts.{rel[1:]}")
+            with open(pkg_dir / f, "w", encoding="utf-8") as fh:
+                fh.write(content)
+    if (model_dir / "processing_minicpmo.py").exists():
+        src = model_dir / "processing_minicpmo.py"
+        content = src.read_text(encoding="utf-8")
+        for rel in [".configuration_minicpmo", ".tokenization_minicpmo_fast", ".utils"]:
+            content = content.replace(f"from {rel}", f"from _minicpm_tts.{rel[1:]}")
+        with open(pkg_dir / "processing_minicpmo.py", "w", encoding="utf-8") as fh:
+            fh.write(content)
+    if (model_dir / "tokenization_minicpmo_fast.py").exists():
+        shutil.copy2(
+            model_dir / "tokenization_minicpmo_fast.py",
+            pkg_dir / "tokenization_minicpmo_fast.py",
+        )
+    (pkg_dir / "__init__.py").touch()
+    if str(Path.cwd()) not in sys.path:
         sys.path.insert(0, str(Path.cwd()))
-        from configuration_minicpmo import MiniCPMOConfig
 
-    # Load TTS config only
-    full_config = MiniCPMOConfig.from_pretrained(model_dir_str, local_files_only=True)
+    from _minicpm_tts.configuration_minicpmo import MiniCPMOConfig
+
+    full_config = MiniCPMOConfig.from_pretrained(str(model_dir), local_files_only=True)
     tts_config = full_config.tts_config
+
+    for attr, val in [
+        ("top_p", 0.95),
+        ("temperature", 1.0),
+        ("repetition_penalty", 1.1),
+        ("do_sample", True),
+        ("num_beams", 1),
+        ("max_length", 2048),
+        ("top_k", 50),
+        ("pad_token_id", 0),
+        ("bos_token_id", 1),
+        ("eos_token_id", 2),
+    ]:
+        if not hasattr(tts_config, attr):
+            setattr(tts_config, attr, val)
+
     logger.info(
-        f"  TTS config: hidden={tts_config.hidden_size}, layers={tts_config.num_hidden_layers}, "
-        f"heads={tts_config.num_attention_heads}, audio_vocab={tts_config.num_audio_tokens}"
+        f"  TTS config: hidden={tts_config.hidden_size}, layers={tts_config.num_hidden_layers}"
     )
 
-    # Create standalone TTS
-    from modeling_minicpmo import MiniCPMTTS
+    from _minicpm_tts.modeling_minicpmo import MiniCPMTTS
 
     tts = MiniCPMTTS(config=tts_config, audio_tokenizer=None)
 
-    # Load tts.* weights from single shard
     shard_path = model_dir / config.tts_shard
-    if not shard_path.exists():
-        logger.error(f"TTS shard not found: {shard_path}")
-        logger.info("Run: .\\start_train_roxy.bat")
-        sys.exit(1)
-
-    logger.info(
-        f"  Loading: {shard_path.name} ({shard_path.stat().st_size / 1e9:.1f} GB)"
-    )
-
     from safetensors.torch import load_file
 
     all_weights = load_file(str(shard_path))
     tts_weights = {k[4:]: v for k, v in all_weights.items() if k.startswith("tts.")}
-    missing, unexpected = tts.load_state_dict(tts_weights, strict=False)
-
-    param_count = sum(v.numel() for v in tts_weights.values())
+    tts.load_state_dict(tts_weights, strict=False)
     logger.info(
-        f"  Loaded {len(tts_weights)} tensors ({param_count / 1e6:.1f}M params)"
+        f"  TTS loaded: {sum(v.numel() for v in tts_weights.values()) / 1e6:.1f}M params"
     )
-    if missing:
-        logger.info(
-            f"  Missing: {len(missing)} keys (text/audio emb — normal for standalone)"
+    return tts
+
+
+def load_s3_tokenizer(model_dir: Path, logger: logging.Logger):
+    """Load Token2wav S3 encoder."""
+    assets = model_dir / "assets" / "token2wav"
+    from stepaudio2 import Token2wav
+
+    s3 = Token2wav(str(assets), float16=False)
+    logger.info(f"  S3 tokenizer loaded from: {assets}")
+    return s3
+
+
+def load_text_tokenizer(model_dir: Path, logger: logging.Logger):
+    """Load tokenizer directly (avoid MiniCPMOProcessor Windows SIGALRM issue)."""
+    try:
+        from _minicpm_tts.tokenization_minicpmo_fast import MiniCPMOTokenizerFast
+
+        tok = MiniCPMOTokenizerFast.from_pretrained(
+            str(model_dir), local_files_only=True
         )
-    return tts, model_dir
+    except Exception:
+        from transformers import AutoTokenizer
+
+        tok = AutoTokenizer.from_pretrained(
+            str(model_dir), trust_remote_code=True, local_files_only=True
+        )
+    logger.info(f"  Tokenizer: {type(tok).__name__}")
+    return tok
 
 
 def apply_lora(tts, config: TTSFineTuneConfig, logger: logging.Logger):
-    from peft import LoraConfig, TaskType, get_peft_model
+    from peft import LoraConfig, LoraModel
 
     peft_config = LoraConfig(
-        task_type=TaskType.CAUSAL_LM,
         r=config.lora_r,
         lora_alpha=config.lora_alpha,
         lora_dropout=config.lora_dropout,
         target_modules=config.lora_target_modules.split(","),
         bias="none",
+        task_type="CAUSAL_LM",
     )
-    tts.model = get_peft_model(tts.model, peft_config)
-    tts.model.print_trainable_parameters()
-    trainable = sum(p.numel() for p in tts.parameters() if p.requires_grad)
-    total = sum(p.numel() for p in tts.parameters())
-    logger.info(f"  LoRA: {trainable / 1e6:.2f}M trainable / {total / 1e6:.1f}M total")
+    tts.model = LoraModel(tts.model, peft_config, adapter_name="default")
+    trainable = sum(p.numel() for p in tts.model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in tts.model.parameters())
+    logger.info(f"  LoRA: {trainable / 1e6:.2f}M / {total / 1e6:.1f}M")
     return tts
 
 
-# ── Training ─────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════
+#  Real Training Loop
+# ══════════════════════════════════════════════════════════
 
 
-def prepare_batch(
-    batch_sample: dict, tts, device: torch.device, logger: logging.Logger
+def prepare_batch_real(
+    sample: dict,
+    tts,
+    s3_tokenizer,
+    text_proc,
+    device: torch.device,
+    logger: logging.Logger,
 ) -> Optional[tuple]:
-    text = batch_sample["text"]
-    try:
-        if not text or len(text) < 2:
-            return None
-        # Simplified tokenization: use character hash
-        token_ids = [ord(c) % 152064 for c in text[:200]]
-        text_emb = tts.emb_text(torch.tensor(token_ids, device=device)).unsqueeze(0)
+    """Real tokenization: text → token IDs, audio → S3 tokens."""
+    text = sample["text"]
+    audio_path = sample["audio_path"]
 
-        # Speaker embedding placeholder
+    try:
+        # 1. Text → token IDs (text_proc is either MiniCPMOProcessor or tokenizer directly)
+        if hasattr(text_proc, "tokenizer"):
+            text_tokens = text_proc.tokenizer.encode(text, add_special_tokens=True)
+        else:
+            text_tokens = text_proc.encode(text, add_special_tokens=True)
+        if not text_tokens or len(text_tokens) < 2:
+            return None
+        text_ids = torch.tensor(text_tokens[:200], device=device)
+        text_emb = tts.emb_text(text_ids).unsqueeze(0)  # (1, text_len, 768)
+
+        # 2. Audio → S3 tokens via S3TokenizerV2.quantize(mel, mel_len)
+        import librosa
+
+        audio_path = Path(sample["audio_path"])
+        if not audio_path.exists():
+            logger.debug(f"Audio missing: {audio_path}")
+            return None
+        wav, sr = librosa.load(str(audio_path), sr=16000, mono=True)
+        # Compute mel spectrogram (128 bins, 16kHz, 25ms window, 10ms hop)
+        mel_spec = librosa.feature.melspectrogram(
+            y=wav, sr=16000, n_mels=128, n_fft=512, hop_length=160, win_length=400
+        )
+        mel_spec = (
+            torch.from_numpy(mel_spec).float().unsqueeze(0).to(device)
+        )  # (1, 128, T)
+        mel_len = torch.tensor([mel_spec.shape[-1]], device=device)
+        s3_codes, s3_code_len = s3_tokenizer.audio_tokenizer.quantize(mel_spec, mel_len)
+        target_ids = s3_codes.squeeze(0).long()
+
+        # 3. Speaker embedding: use projectors on zero-input (will learn from data)
         spk_emb = tts.projector_spk(
             torch.zeros(1, 1, 4096, device=device, dtype=text_emb.dtype)
         )
+        # Note: real training should extract spk_emb from Whisper encoding of reference audio.
+        # For now, the speaker embedding is a trainable zero-input → the model learns
+        # to associate specific speaker characteristics through the training data.
 
-        # Target tokens placeholder
-        target_len = max(10, int(len(text) * 0.3))
-        target_ids = torch.randint(0, 6562, (target_len,), device=device)
-
-        combined = torch.cat([spk_emb, text_emb], dim=1)
+        # 4. Construct input: [spk | text]
+        combined = torch.cat([spk_emb, text_emb], dim=1)  # (1, 1+text_len, 768)
         return combined, target_ids
+
     except Exception as e:
-        logger.debug(f"Prepare: {e}")
+        logger.debug(f"Prep error [{text[:30]}...]: {e}")
         return None
 
 
-def train_epoch(
-    tts, train_loader, optimizer, scheduler, config, logger, global_step, device
-):
+def train_epoch(tts, loader, opt, sched, config, logger, global_step, device, s3, proc):
     tts.train()
     total_loss = 0.0
-    batch_count = 0
-
-    for batch_idx, batch in enumerate(train_loader):
-        batch_losses = []
+    bc = 0
+    for bi, batch in enumerate(loader):
+        bls = []
         for sample in batch:
-            result = prepare_batch(sample, tts, device, logger)
-            if result is None:
+            r = prepare_batch_real(sample, tts, s3, proc, device, logger)
+            if r is None:
                 continue
-            combined, target_ids = result
-
+            combined, target_ids = r
             hidden = tts.model(inputs_embeds=combined).last_hidden_state
             text_len = combined.shape[1] - 1
-            pred = tts.head_code(hidden[:, -text_len:, :])
-            pred = pred[:, : len(target_ids), :]
-            pred = pred.reshape(-1, pred.size(-1))
+            head = (
+                tts.head_code[0]
+                if isinstance(tts.head_code, torch.nn.ModuleList)
+                else tts.head_code
+            )
+            pred = head(hidden[:, -text_len:, :])
+            pred = pred[:, : len(target_ids), :].reshape(-1, pred.size(-1))
             tgt = target_ids[: pred.shape[0]]
-
             loss = F.cross_entropy(pred, tgt) / config.gradient_accumulation_steps
             loss.backward()
-            batch_losses.append(loss.item() * config.gradient_accumulation_steps)
-
-        if not batch_losses:
+            bls.append(loss.item() * config.gradient_accumulation_steps)
+        if not bls:
             continue
-        avg = sum(batch_losses) / len(batch_losses)
+        avg = sum(bls) / len(bls)
         total_loss += avg
-        batch_count += 1
-
-        if (batch_idx + 1) % config.gradient_accumulation_steps == 0:
+        bc += 1
+        if (bi + 1) % config.gradient_accumulation_steps == 0:
             torch.nn.utils.clip_grad_norm_(tts.parameters(), config.max_grad_norm)
-            optimizer.step()
-            scheduler.step()
-            optimizer.zero_grad()
+            opt.step()
+            sched.step()
+            opt.zero_grad()
             global_step += 1
             if global_step % config.logging_steps == 0:
                 logger.info(
-                    f"  Step {global_step:4d} | Loss: {avg:.4f} | "
-                    f"LR: {scheduler.get_last_lr()[0]:.2e}"
+                    f"  Step {global_step:4d} | Loss: {avg:.4f} | LR: {sched.get_last_lr()[0]:.2e}"
                 )
             if global_step % config.save_steps == 0:
-                save_checkpoint(tts, config, global_step, logger)
+                save_ckpt(tts, config, global_step, logger)
+    return total_loss / max(bc, 1), global_step
 
-    return total_loss / max(batch_count, 1), global_step
 
-
-def save_checkpoint(tts, config: TTSFineTuneConfig, step: int, logger: logging.Logger):
+def save_ckpt(tts, config, step, logger):
     try:
         out = Path(config.output_dir) / f"checkpoint-{step}"
         out.mkdir(parents=True, exist_ok=True)
-        if hasattr(tts.model, "save_pretrained"):
-            tts.model.save_pretrained(str(out))
+        tts.model.save_pretrained(str(out))
         (out / "tts_config.json").write_text(
             json.dumps(
                 {
@@ -319,25 +360,21 @@ def save_checkpoint(tts, config: TTSFineTuneConfig, step: int, logger: logging.L
         )
         logger.info(f"  Checkpoint: {out}")
     except Exception as e:
-        logger.error(f"  Save failed: {e}")
+        logger.error(f"Save: {e}")
 
 
 def train(config: TTSFineTuneConfig):
-    output_dir = Path(config.output_dir)
-    logger = setup_logging(output_dir)
-    logger.info("=" * 60)
-    logger.info("  Roxy TTS — MiniCPM-o 4.5 Standalone LoRA Fine-Tuning")
-    logger.info(f"  Speaker: {config.speaker_name}  |  Language: {config.language}")
-    logger.info("=" * 60)
-
-    # Dataset
-    dataset = RoxyTTSDataset(config.dataset_jsonl)
-    train_data, val_data = split_dataset(dataset, config.val_split, config.seed)
-    dur = sum(s.get("duration_sec", 0) for s in train_data)
+    od = Path(config.output_dir)
+    logger = setup_logging(od)
     logger.info(
-        f"\n[Dataset] Train: {len(train_data)} | Val: {len(val_data)} | ~{dur / 60:.1f} min"
+        f"{'=' * 60}\n  Roxy TTS — Real Tokenizer Training\n  Speaker: {config.speaker_name}\n{'=' * 60}"
     )
-    train_loader = DataLoader(
+
+    dataset = RoxyTTSDataset(config.dataset_jsonl)
+    train_data, _ = split_dataset(dataset, config.val_split, config.seed)
+    dur = sum(s.get("duration_sec", 0) for s in train_data)
+    logger.info(f"\n[Dataset] Train: {len(train_data)} | ~{dur / 60:.1f} min")
+    loader = DataLoader(
         train_data,
         batch_size=config.batch_size,
         shuffle=True,
@@ -345,45 +382,41 @@ def train(config: TTSFineTuneConfig):
         num_workers=0,
     )
 
-    # Model
     model_dir = find_model_cache(config, logger)
     logger.info(f"\n[Model] Cache: {model_dir}")
-    tts, model_dir = load_tts_standalone(model_dir, config, logger)
+    tts = load_tts_standalone(model_dir, config, logger)
+    s3 = load_s3_tokenizer(model_dir, logger)
+    proc = load_text_tokenizer(model_dir, logger)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tts = tts.to(device)
     logger.info(
         f"  Device: {device} ({torch.cuda.get_device_name(0) if device.type == 'cuda' else 'CPU'})"
     )
 
-    # LoRA
     logger.info("\n[LoRA] Injecting...")
     tts = apply_lora(tts, config, logger)
 
-    # Optimizer
     trainable = [p for p in tts.parameters() if p.requires_grad]
-    optimizer = torch.optim.AdamW(
+    opt = torch.optim.AdamW(
         trainable, lr=config.learning_rate, weight_decay=config.weight_decay
     )
-    total_steps = (
-        config.num_epochs * len(train_loader) // config.gradient_accumulation_steps
-    )
+    total_steps = config.num_epochs * len(loader) // config.gradient_accumulation_steps
     from torch.optim.lr_scheduler import CosineAnnealingLR
 
-    scheduler = CosineAnnealingLR(optimizer, T_max=max(1, total_steps))
+    sched = CosineAnnealingLR(opt, T_max=max(1, total_steps))
+    logger.info(f"\n[Train] Epochs: {config.num_epochs} | Steps: ~{total_steps}")
 
-    logger.info(
-        f"\n[Train] Epochs: {config.num_epochs} | Steps: ~{total_steps} | LR: {config.learning_rate}"
-    )
     global_step = 0
     for epoch in range(config.num_epochs):
         logger.info(f"\n--- Epoch {epoch + 1}/{config.num_epochs} ---")
         avg_loss, global_step = train_epoch(
-            tts, train_loader, optimizer, scheduler, config, logger, global_step, device
+            tts, loader, opt, sched, config, logger, global_step, device, s3, proc
         )
         logger.info(f"  Epoch {epoch + 1} avg loss: {avg_loss:.4f}")
 
-    save_checkpoint(tts, config, "final", logger)
-    (output_dir / "train_config.json").write_text(
+    save_ckpt(tts, config, "final", logger)
+    (od / "train_config.json").write_text(
         json.dumps(
             {k: str(v) for k, v in config.__dict__.items()},
             ensure_ascii=False,
@@ -391,23 +424,22 @@ def train(config: TTSFineTuneConfig):
         ),
         encoding="utf-8",
     )
-    logger.info(f"\nDone. Next: python scripts/merge_roxy_tts.py")
+    logger.info(f"\nDone. Output: {od}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Roxy TTS standalone LoRA training")
-    parser.add_argument(
-        "--check", action="store_true", help="Verify model loading only"
-    )
-    args = parser.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument("--check", action="store_true")
+    args = p.parse_args()
     config = TTSFineTuneConfig()
-
     if args.check:
         logger = setup_logging(Path(config.output_dir))
         model_dir = find_model_cache(config, logger)
-        tts, _ = load_tts_standalone(model_dir, config, logger)
+        tts = load_tts_standalone(model_dir, config, logger)
+        s3 = load_s3_tokenizer(model_dir, logger)
+        proc = load_text_tokenizer(model_dir, logger)
         logger.info(
-            f"\nOK! TTS loaded: {sum(p.numel() for p in tts.parameters()) / 1e6:.1f}M params"
+            f"\nOK! All components loaded: TTS {sum(p.numel() for p in tts.parameters()) / 1e6:.1f}M, S3 ready, Tokenizer ready"
         )
     else:
         train(config)

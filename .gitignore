@@ -37,6 +37,14 @@ live_hub/tmp_*
 # ═══════════════════════════════════════════
 # IDE / 工具 / 缓存
 # ═══════════════════════════════════════════
+_minicpm_tts/
+configuration_minicpmo.py
+modeling_minicpmo.py
+modeling_navit_siglip.py
+processing_minicpmo.py
+tokenization_minicpmo_fast.py
+utils.py
+dataset/tts/*_processed/
 .vscode/
 .idea/
 .claude/
