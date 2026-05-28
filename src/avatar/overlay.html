@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenNeuro — VRM Avatar</title>
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    background: transparent;  /* OBS transparent capture */
+  }
+  body { font-family: -apple-system, sans-serif; }
+
+  /* Debug overlay (hidden in OBS) */
+  #status {
+    position: fixed; bottom: 8px; left: 8px;
+    background: rgba(0,0,0,0.6); color: #0f0;
+    font-size: 11px; padding: 4px 8px; border-radius: 4px;
+    font-family: monospace; z-index: 100;
+  }
+  #status.disconnected { color: #f44; }
+  #subtitle {
+    position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
+    color: #fff; font-size: 22px; text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+    max-width: 80vw; text-align: center; z-index: 99;
+    background: rgba(0,0,0,0.4); padding: 6px 18px; border-radius: 8px;
+    opacity: 0; transition: opacity 0.3s;
+  }
+  #subtitle.visible { opacity: 1; }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+<div id="status" class="disconnected">⚫ disconnected</div>
+<div id="subtitle"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+// ═══════════════════════════════════════════
+// OpenNeuro — VRM Avatar Overlay (Phase 2)
+// Browser-based 3D avatar renderer for OBS capture.
+//
+// Stack: Three.js + @pixiv/three-vrm (CDN)
+// Protocol: WebSocket from Python backend
+// Output: transparent canvas → OBS window capture
+// ═══════════════════════════════════════════
+
+import * as THREE from 'three';
+
+// ── Configuration ──────────────────────────
+const WS_URL = 'ws://127.0.0.1:9070/ws/vrm';
+const VRM_PATH = '../assets/avatars/default.vrm'; // @pixiv/three-vrm will load this
+const CANVAS_ID = 'canvas';
+
+// ── State ──────────────────────────────────
+let scene, camera, renderer, clock;
+let vrmModel = null;          // @pixiv/three-vrm VRM instance
+let ws = null;
+let reconnectTimer = null;
+let expressionQueue = [];
+let currentExpression = null;
+
+// Animation state
+let animationState = {
+  idle: true,                 // idle mode
+  speaking: false,            // TTS active
+  currentFrame: 0,
+  totalFrames: 0,
+  blendshapes: {},            // current target BlendShape weights
+  pendingReset: null,         // setTimeout id for auto-reset
+};
+
+// Idle animation timers
+let lastBlinkTime = 0;
+const BLINK_INTERVAL_MS = 3000;
+const BLINK_DURATION_MS = 150;
+
+// ── DOM ────────────────────────────────────
+const canvas = document.getElementById(CANVAS_ID);
+const statusEl = document.getElementById('status');
+const subtitleEl = document.getElementById('subtitle');
+
+// ═══════════════════════════════════════════
+//  Phase 2: Three.js Setup (Skeleton)
+// ═══════════════════════════════════════════
+
+function initRenderer() {
+  renderer = new THREE.WebGLRenderer({
+    canvas,
+    alpha: true,              // transparent background
+    antialias: true,
+    preserveDrawingBuffer: true,
+  });
+  renderer.setClearColor(0x000000, 0); // fully transparent
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  scene = new THREE.Scene();
+
+  // Ambient + directional light for MToon shader
+  const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+  scene.add(ambient);
+  const directional = new THREE.DirectionalLight(0xffffff, 0.6);
+  directional.position.set(0, 1.5, 2);
+  scene.add(directional);
+
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 50);
+  camera.position.set(0, 1.4, 2.5);
+  camera.lookAt(0, 1.0, 0);
+
+  clock = new THREE.Clock();
+}
+
+async function loadVRMModel() {
+  // TODO Phase 2: @pixiv/three-vrm import + VRM.from()
+  //   const { VRM } = await import('https://unpkg.com/@pixiv/three-vrm@3/lib/three-vrm.module.js');
+  //   vrmModel = await VRM.from(fetch(VRM_PATH).then(r => r.arrayBuffer()));
+  //   scene.add(vrmModel.scene);
+  //   vrmModel.springBone?.reset();
+  console.log('[avatar] VRM model loading stub — Phase 2 implementation');
+  statusEl.textContent = '🟡 VRM stub (Phase 2)';
+}
+
+// ═══════════════════════════════════════════
+//  Phase 3: BlendShape Control (Skeleton)
+// ═══════════════════════════════════════════
+
+/**
+ * Apply BlendShape weights with easeInOutCubic easing.
+ * Phase 3 implementation — will map expression JSON to VRM BlendShapeProxy.
+ *
+ * @param {Object} blendshapes — {blendShapeName: weight (0.0-1.0)}
+ * @param {number} durationMs — transition duration
+ */
+function applyBlendShapes(blendshapes, durationMs = 800) {
+  if (!vrmModel) {
+    console.log('[avatar] VRM not loaded, queueing expression');
+    expressionQueue.push({ blendshapes, durationMs });
+    return;
+  }
+
+  // TODO Phase 3:
+  //   const proxy = vrmModel.expressionManager;
+  //   for (const [key, weight] of Object.entries(blendshapes)) {
+  //     proxy.setValue(key, weight);  // with easeInOutCubic interpolation
+  //   }
+  console.log('[avatar] applyBlendShapes stub:', Object.keys(blendshapes).length, 'keys');
+}
+
+function resetToDefault(durationMs = 800) {
+  if (animationState.pendingReset) {
+    clearTimeout(animationState.pendingReset);
+  }
+  // TODO Phase 3: reset all BlendShapes to neutral
+  console.log('[avatar] resetToDefault stub');
+  animationState.blendshapes = {};
+}
+
+/**
+ * easeInOutCubic — SoulLink standard easing function
+ */
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1;
+}
+
+// ═══════════════════════════════════════════
+//  Phase 4: Lip Sync (Skeleton)
+// ═══════════════════════════════════════════
+
+/**
+ * Drive mouth BlendShape from audio amplitude.
+ * Phase 4 implementation — will use Web Audio API AnalyzerNode.
+ */
+function updateLipSync(amplitude) {
+  // TODO Phase 4:
+  //   const mouthOpen = Math.min(amplitude * 3.0, 1.0);
+  //   if (vrmModel) vrmModel.expressionManager.setValue('mouthOpen', mouthOpen);
+  if (amplitude > 0.01) {
+    // Stub: just log lip sync activity
+  }
+}
+
+// ═══════════════════════════════════════════
+//  WebSocket Protocol (Skeleton)
+// ═══════════════════════════════════════════
+
+function connectWebSocket() {
+  if (ws) { ws.close(); }
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    statusEl.textContent = '🟢 connected';
+    statusEl.classList.remove('disconnected');
+    ws.send(JSON.stringify({ type: 'handshake', client: 'vrm-overlay', version: '0.1.0' }));
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    handleMessage(msg);
+  };
+
+  ws.onclose = () => {
+    statusEl.textContent = '🔴 disconnected';
+    statusEl.classList.add('disconnected');
+    scheduleReconnect();
+  };
+
+  ws.onerror = () => {
+    statusEl.textContent = '🔴 error';
+    statusEl.classList.add('disconnected');
+  };
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connectWebSocket, 3000);
+}
+
+/**
+ * Handle inbound WebSocket messages.
+ * Protocol — Phase 3+4:
+ *   {"type":"expression",  "expression":"...", "blendshapes":{...}, "duration_ms":800, "auto_reset_ms":3000}
+ *   {"type":"preset",      "name":"happy", "intensity":0.8}
+ *   {"type":"tts_motion_start", "frames":12, "frame_duration_ms":2000}
+ *   {"type":"tts_motion_frame", "frame":0, "blendshapes":{...}, "duration_ms":2000}
+ *   {"type":"tts_motion_end"}
+ *   {"type":"reset",       "duration_ms":800}
+ *   {"type":"subtitle",    "text":"..."}
+ */
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'expression':
+      // TODO Phase 3
+      applyBlendShapes(msg.blendshapes, msg.duration_ms || 800);
+      if (msg.auto_reset_ms) {
+        animationState.pendingReset = setTimeout(() => resetToDefault(), msg.auto_reset_ms);
+      }
+      break;
+
+    case 'preset':
+      // TODO Phase 3: lookup PRESET_EXPRESSIONS[msg.name], apply with intensity
+      console.log('[avatar] preset stub:', msg.name);
+      break;
+
+    case 'tts_motion_start':
+      // TODO Phase 4: lock idle, prepare frame queue
+      animationState.speaking = true;
+      animationState.totalFrames = msg.frames;
+      animationState.currentFrame = 0;
+      break;
+
+    case 'tts_motion_frame':
+      // TODO Phase 4: apply frame blendshapes, increment counter
+      applyBlendShapes(msg.blendshapes, msg.duration_ms || 2000);
+      animationState.currentFrame = msg.frame + 1;
+      break;
+
+    case 'tts_motion_end':
+      // TODO Phase 4: resume idle after delay
+      animationState.speaking = false;
+      setTimeout(() => { animationState.idle = true; }, 500);
+      break;
+
+    case 'reset':
+      resetToDefault(msg.duration_ms || 800);
+      break;
+
+    case 'subtitle':
+      showSubtitle(msg.text);
+      break;
+
+    case 'heartbeat':
+      // pong — handled by server
+      break;
+
+    default:
+      console.log('[avatar] unknown message type:', msg.type);
+  }
+}
+
+function showSubtitle(text) {
+  subtitleEl.textContent = text;
+  subtitleEl.classList.add('visible');
+  setTimeout(() => subtitleEl.classList.remove('visible'), 5000);
+}
+
+function sendPing() {
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'ping' }));
+  }
+}
+
+// ═══════════════════════════════════════════
+//  Idle Animation Loop (Skeleton)
+// ═══════════════════════════════════════════
+
+function idleLoop(deltaTime) {
+  if (!vrmModel) return;
+
+  const now = performance.now();
+
+  // Auto blink
+  if (now - lastBlinkTime > BLINK_INTERVAL_MS) {
+    // TODO Phase 2: trigger eyeClose BlendShape briefly
+    lastBlinkTime = now;
+  }
+
+  // Breathing (subtle body scale oscillation)
+  // TODO Phase 2: vrmModel.scene.scale oscillation
+
+  // Random head movement
+  // TODO Phase 2: small random head rotation
+}
+
+// ═══════════════════════════════════════════
+//  Render Loop
+// ═══════════════════════════════════════════
+
+function renderLoop() {
+  requestAnimationFrame(renderLoop);
+
+  const delta = clock.getDelta();
+
+  if (animationState.idle && !animationState.speaking) {
+    idleLoop(delta);
+  }
+
+  // TODO Phase 4: update lip sync from audio amplitude
+
+  if (vrmModel) {
+    vrmModel.update(delta);
+  }
+
+  renderer.render(scene, camera);
+}
+
+// ═══════════════════════════════════════════
+//  Init
+// ═══════════════════════════════════════════
+
+window.addEventListener('DOMContentLoaded', async () => {
+  initRenderer();
+  connectWebSocket();
+  setInterval(sendPing, 5000);
+  // loadVRMModel();  // uncomment in Phase 2
+  renderLoop();
+});
+
+window.addEventListener('resize', () => {
+  if (renderer && camera) {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+  }
+});
+
+// Expose control API for browser console debugging (Phase 2+)
+window.avatarControl = {
+  applyBlendShapes,
+  resetToDefault,
+  showSubtitle,
+};
+</script>
+</body>
+</html>

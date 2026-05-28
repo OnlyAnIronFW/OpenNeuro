@@ -51,3 +51,11 @@ live_hub/tmp_*
 # ═══════════════════════════════════════════
 gui/node_modules/
 gui/dist/
+
+# ═══════════════════════════════════════════
+# VRM Avatar — 模型文件 + 本地档案
+# ═══════════════════════════════════════════
+assets/avatars/*.vrm
+assets/avatars/*.vrm_profile.json
+assets/avatars/*/avatar_prompt.txt
+src/avatar/__pycache__/

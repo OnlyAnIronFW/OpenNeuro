@@ -58,6 +58,40 @@ memory:
     backend: "pgvector"
     viewer_min_interactions: 3
 
+# ── VRM 3D 形象 ────────────────────────────
+avatar:
+  enabled: false                          # Phase 5 启用
+  vrm_path: "assets/avatars/default.vrm"  # VRM 模型路径
+  ws_port: 9070                           # WebSocket 端口 (浏览器连接)
+  expression:
+    mode: "local"                         # local | llm (Phase 3)
+    llm:
+      provider: "deepseek"
+      model: "deepseek-chat"
+      api_key: "${DEEPSEEK_API_KEY}"
+      temperature: 0.2
+      max_tokens: 800
+    update_interval_ms: 100               # 表情参数推送间隔
+  tts:
+    lip_sync_enabled: true                # TTS音频→口型同步
+    motion_planning: false                # 两阶段动作规划 (Phase 4)
+    frame_duration_ms: 2000               # 动作帧时长
+  animation:
+    ease_function: "easeInOutCubic"
+    default_duration_ms: 800              # 默认过渡时长
+    auto_reset_ms: 3000                   # 自动回退idle延迟
+    joint_motion_boost: 1.25              # 关节动作放大器 (SoulLink)
+  idle:
+    blink_interval_ms: 3000               # 眨眼间隔
+    breath_amplitude: 0.02                # 呼吸幅度
+    random_head_movement: true
+  cache:
+    lru_size: 100                         # LRU缓存容量
+    preset_fallback: true                 # 本地预设兜底
+  profile:
+    auto_scan: true                       # 自动扫描模型档案
+    custom_prompt_path: ""                # 模型专属Prompt
+
 self_iteration:
   phase2_3:
     trigger: "stream_end"
