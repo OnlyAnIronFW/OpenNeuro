@@ -18,6 +18,7 @@ import logging
 import os
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -58,6 +59,7 @@ class MiniCPMTTSEngine:
         self._prompt_path = None  # prompt WAV 路径
         self._ready = False
         self._device = None
+        self._decode_lock = threading.Lock()
 
     # ──────────── 初始化 ────────────
 
@@ -189,13 +191,13 @@ class MiniCPMTTSEngine:
         if not self._prompt_path or not self._prompt_path.exists():
             return np.zeros(self._config.sample_rate)
 
-        # Initialize stream cache from prompt
-        self._s3.stream_cache, self._s3.hift_cache_dict = self._s3.set_stream_cache(
-            str(self._prompt_path)
-        )
-
-        # Decode all tokens
-        wav_out = self._s3.stream(s3_tokens, None, return_waveform=True)
+        with self._decode_lock:
+            # Initialize stream cache from prompt
+            self._s3.stream_cache, self._s3.hift_cache_dict = self._s3.set_stream_cache(
+                str(self._prompt_path)
+            )
+            # Decode all tokens
+            wav_out = self._s3.stream(s3_tokens, None, return_waveform=True)
         return wav_out.squeeze()
 
     # ──────────── 播放 ────────────
@@ -209,8 +211,6 @@ class MiniCPMTTSEngine:
                 sd.play(audio, self._config.sample_rate)
                 sd.wait()
             else:
-                import threading
-
                 t = threading.Thread(
                     target=lambda: (
                         sd.play(audio, self._config.sample_rate) or sd.wait()
@@ -223,9 +223,11 @@ class MiniCPMTTSEngine:
                 "sounddevice not installed. Install: pip install sounddevice"
             )
             # Fallback: save to file
+            import hashlib
             import soundfile as sf
 
-            out = Path(tempfile.gettempdir()) / f"_tts_{hash(text) & 0xFFFF}.wav"
+            sig = hashlib.md5(audio.tobytes()[:1024]).hexdigest()[:6]
+            out = Path(tempfile.gettempdir()) / f"_tts_{sig}.wav"
             sf.write(str(out), audio, self._config.sample_rate)
             logger.info(f"Saved to {out}")
 
