@@ -44,6 +44,7 @@ modeling_navit_siglip.py
 processing_minicpmo.py
 tokenization_minicpmo_fast.py
 utils.py
+Charaset/
 dataset/tts/*_processed/
 .vscode/
 .idea/

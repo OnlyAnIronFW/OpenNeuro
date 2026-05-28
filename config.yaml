@@ -131,3 +131,21 @@ session:
   auto_save_recording: true
   recording_path: "data/recordings"
   generate_post_stream_report: true
+
+# ═══════════════════════════════════════════
+# MiniCPM-o TTS 语音输出
+# ═══════════════════════════════════════════
+tts:
+  enabled: true
+  provider: "minicpm_o"          # MiniCPM-o 内置 TTS
+  # 训练后的 Roxy 音色权重
+  weights_path: "checkpoints/roxy_tts_v2/merged/checkpoint-final/tts_merged.safetensors"
+  # 参考音频 (Roxy 音色 prompt)
+  prompt_audio: ""
+  # 音频输出
+  audio_output_device: "CABLE Input"  # VB-Cable 虚拟音频设备
+  sample_rate: 16000
+  # 生成参数
+  max_text_length: 200
+  # 异步 — 不阻塞消息处理
+  play_async: true

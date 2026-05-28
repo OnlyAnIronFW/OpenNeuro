@@ -91,6 +91,22 @@ async def main(args=None):
     total_danmaku = 0
     total_replies = 0
 
+    # TTS 引擎 (按需延迟加载)
+    tts_engine = None
+
+    async def _ensure_tts():
+        nonlocal tts_engine
+        if tts_engine is not None:
+            return tts_engine
+        try:
+            from src.tts import get_tts_engine
+
+            tts_engine = await get_tts_engine()
+            return tts_engine
+        except Exception as e:
+            print(f"[!] TTS init failed: {e}", flush=True)
+            return None
+
     async def on_msg(msg):
         nonlocal total_danmaku, total_replies
         total_danmaku += 1
@@ -121,6 +137,15 @@ async def main(args=None):
                 f"  >>> [{streamer._emotion.to_prompt_str()}] {reply} ({lat:.0f}ms)",
                 flush=True,
             )
+            # TTS 语音输出
+            eng = await _ensure_tts()
+            if eng and eng.is_ready():
+                try:
+                    audio = await eng.synthesize(reply)
+                    if audio is not None:
+                        eng.play(audio)
+                except Exception as e:
+                    print(f"  [!] TTS failed: {e}", flush=True)
         else:
             print(f"  --- ({lat:.0f}ms)", flush=True)
 
