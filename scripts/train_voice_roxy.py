@@ -178,9 +178,23 @@ def load_minicpmo_tts(config: TTSFineTuneConfig, logger: logging.Logger):
     try:
         from transformers import AutoModel
 
+        # 离线优先: 检查本地缓存
+        import os
+
+        cache_dir = os.path.expandvars(
+            r"%USERPROFILE%\.cache\huggingface\hub\models--openbmb--MiniCPM-o-4_5\snapshots"
+        )
+        local_only = os.path.isdir(cache_dir)
+        if local_only:
+            logger.info(f"  Using local cache: {cache_dir}")
+            model_path = cache_dir
+        else:
+            model_path = config.model_id
+
         model = AutoModel.from_pretrained(
-            config.model_id,
+            model_path,
             trust_remote_code=True,
+            local_files_only=True,
             torch_dtype=torch.bfloat16 if config.bf16 else torch.float32,
             init_vision=False,  # 不需要视觉
             init_audio=False,  # 不需要音频编码器 (只用 TTS 侧)
