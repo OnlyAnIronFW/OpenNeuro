@@ -23,9 +23,9 @@ async def _ensure_tts_engine():
     if _tts_engine is not None:
         return _tts_engine
     try:
-        from src.tts import get_tts_engine
+        from src.tts import get_comni_bridge
 
-        _tts_engine = await get_tts_engine()
+        _tts_engine = await get_comni_bridge()
         return _tts_engine
     except Exception as e:
         log_manager.get("gui").warning(f"TTS init failed: {e}")
@@ -38,9 +38,7 @@ async def _tts_speak(text: str):
     if not eng or not eng.is_ready():
         return
     try:
-        audio = await eng.synthesize(text)
-        if audio is not None:
-            eng.play(audio)
+        await eng.speak(text)
     except Exception as e:
         log_manager.get("gui").warning(f"TTS speak failed: {e}")
 

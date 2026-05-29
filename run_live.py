@@ -99,9 +99,9 @@ async def main(args=None):
         if tts_engine is not None:
             return tts_engine
         try:
-            from src.tts import get_tts_engine
+            from src.tts import get_comni_bridge
 
-            tts_engine = await get_tts_engine()
+            tts_engine = await get_comni_bridge()
             return tts_engine
         except Exception as e:
             print(f"[!] TTS init failed: {e}", flush=True)
@@ -141,9 +141,7 @@ async def main(args=None):
             eng = await _ensure_tts()
             if eng and eng.is_ready():
                 try:
-                    audio = await eng.synthesize(reply)
-                    if audio is not None:
-                        eng.play(audio)
+                    await eng.speak(reply)
                 except Exception as e:
                     print(f"  [!] TTS failed: {e}", flush=True)
         else:
