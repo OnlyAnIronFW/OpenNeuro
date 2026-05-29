@@ -138,6 +138,8 @@ class MiniCPMTTSEngine:
 
         self._prompt_path = Path(tempfile.gettempdir()) / "_roxy_tts_prompt.wav"
         wav, sr = librosa.load(prompt_path, sr=16000, mono=True)
+        # Trim to 1.5s to fit streaming buffer
+        wav = wav[:24000]
         sf.write(str(self._prompt_path), wav, 16000)
         self._prompt_wav = torch.from_numpy(wav).float().unsqueeze(0)
         logger.info(
@@ -152,51 +154,33 @@ class MiniCPMTTSEngine:
     async def synthesize(self, text: str) -> Optional[np.ndarray]:
         """文本 → 语音波形。
 
+        NOTE: Standalone MiniCPMTTS.generate() produces garbage S3 tokens
+        without LLM conditioning (needs full MiniCPM-o LLM hidden states).
+        For now, this returns None — TTS requires the full model pipeline.
+        Tracked as TODO: integrate via llama-server speech API.
+
         Returns:
-            numpy array (T,) float32 in [-1, 1], or None on failure.
+            numpy array (T,) float32 or None.
         """
         if not self._ready:
-            logger.error("TTS engine not ready")
             return None
         if not text or len(text.strip()) < 2:
             return None
 
-        # 1. Tokenize
-        ids = self._tok.encode(text, add_special_tokens=True)
-        text_ids = torch.tensor(ids[:200], device=self._device)
-        text_emb = self._tts.emb_text(text_ids).unsqueeze(0)
-
-        # 2. Speaker embedding (zero-conditioned → TTS learns from prompt audio)
-        spk_emb = self._tts.projector_spk(
-            torch.zeros(1, 1, 4096, device=self._device, dtype=text_emb.dtype)
-        )
-
-        # 3. Forward → S3 tokens
-        combined = torch.cat([spk_emb, text_emb], dim=1)
-        with torch.no_grad():
-            hidden = self._tts.model(inputs_embeds=combined).last_hidden_state
-            head = (
-                self._tts.head_code[0]
-                if isinstance(self._tts.head_code, torch.nn.ModuleList)
-                else self._tts.head_code
-            )
-            logits = head(hidden)
-            s3_tokens = logits.argmax(dim=-1).squeeze(0).cpu().tolist()
-
-        # 4. Stream → waveform via Token2wav
-        return await asyncio.to_thread(self._decode_s3, s3_tokens)
+        # Standalone TTS not yet functional — needs full LLM conditioning
+        # TODO: call llama-server /v1/audio/speech endpoint when available
+        logger.debug("TTS not available without full LLM conditioning")
+        return None
 
     def _decode_s3(self, s3_tokens: list[int]) -> np.ndarray:
-        """S3 tokens → waveform (blocking, runs in thread)."""
+        """S3 tokens → waveform via stream decoder."""
         if not self._prompt_path or not self._prompt_path.exists():
             return np.zeros(self._config.sample_rate)
 
         with self._decode_lock:
-            # Initialize stream cache from prompt
             self._s3.stream_cache, self._s3.hift_cache_dict = self._s3.set_stream_cache(
                 str(self._prompt_path)
             )
-            # Decode all tokens
             wav_out = self._s3.stream(s3_tokens, None, return_waveform=True)
         return wav_out.squeeze()
 
