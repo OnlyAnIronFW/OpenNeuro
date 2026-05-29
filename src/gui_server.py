@@ -14,6 +14,37 @@ from pydantic import BaseModel
 from src.main import AIStreamer
 from src.utils.logger import log_manager
 
+_tts_engine = None
+
+
+async def _ensure_tts_engine():
+    """延迟加载全局 TTS 引擎."""
+    global _tts_engine
+    if _tts_engine is not None:
+        return _tts_engine
+    try:
+        from src.tts import get_tts_engine
+
+        _tts_engine = await get_tts_engine()
+        return _tts_engine
+    except Exception as e:
+        log_manager.get("gui").warning(f"TTS init failed: {e}")
+        return None
+
+
+async def _tts_speak(text: str):
+    """TTS 合成 + 播放 (非阻塞, 独立协程)."""
+    eng = await _ensure_tts_engine()
+    if not eng or not eng.is_ready():
+        return
+    try:
+        audio = await eng.synthesize(text)
+        if audio is not None:
+            eng.play(audio)
+    except Exception as e:
+        log_manager.get("gui").warning(f"TTS speak failed: {e}")
+
+
 app = FastAPI(title="AI Streamer Backend")
 streamer: Optional[AIStreamer] = None
 
@@ -47,7 +78,7 @@ async def startup():
     api_key = streamer._cfg.current.s2_model.api_key
     streamer._s2._mock_mode = not (api_key and not api_key.startswith("${"))
     await streamer.start()
-    print("[GUI Backend] started on :9070")
+    print("[GUI Backend] started on :9071")
 
 
 @app.on_event("shutdown")
@@ -88,8 +119,11 @@ async def send_message(req: MessageRequest):
     direction, confidence = _gen_mock_s1_direction(text)
 
     if s._s2._mock_mode:
-        # S2 mock → 直接调 API, 不走 handle_message (避免mock管道缠绕)
+        # S2 mock 直接调 API, 不走 handle_message (避免mock管道缠绕)
         reply = await _direct_s2_reply(s, text, direction, confidence)
+        # TTS 语音输出
+        if reply and len(reply) > 1:
+            _ = asyncio.create_task(_tts_speak(reply))
         return {
             "reply": reply,
             "s1_token": "Start-Speaking",
@@ -114,6 +148,10 @@ async def send_message(req: MessageRequest):
             "mentioned_bot": req.mentioned_bot,
         }
     )
+
+    # TTS 语音输出
+    if reply and len(reply) > 1:
+        _ = asyncio.create_task(_tts_speak(reply))
 
     total_ms = (time.perf_counter() - t0) * 1000
     last = s._reply_history[-1] if s._reply_history else None

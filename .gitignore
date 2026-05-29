@@ -78,3 +78,4 @@ dataset/**/*.ogg
 dataset/**/desktop.ini
 dataset/**/Thumbs.db
 checkpoints/
+gui_test*

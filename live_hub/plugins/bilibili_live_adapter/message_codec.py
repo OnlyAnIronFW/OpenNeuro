@@ -4,16 +4,42 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+import hashlib
 import math
 import re
 import time
 from uuid import uuid4
 
-from src.common.utils.utils_session import SessionUtils
-from src.config.config import global_config
-
 from .config import LiveAdapterSettings
 from .constants import PLATFORM_NAME
+
+
+def _calculate_session_id(
+    platform: str,
+    *,
+    user_id: str | None = None,
+    group_id: str | None = None,
+    account_id: str | None = None,
+    scope: str | None = None,
+) -> str:
+    """Calculate a deterministic session_id for MaiBot memory routing.
+
+    Mirrors SessionUtils.calculate_session_id from MaiBot core.
+    """
+    if not user_id and not group_id:
+        raise ValueError("UserID or GroupID must be provided")
+
+    components = [platform]
+    if account_id:
+        components.append(f"account:{account_id}")
+    if scope:
+        components.append(f"scope:{scope}")
+
+    if group_id:
+        components.append(group_id)
+    else:
+        components.extend([user_id or "", "private"])
+    return hashlib.md5("_".join(components).encode()).hexdigest()
 
 
 _MODEL_RESERVED_TOKEN_RE = re.compile(r"<[|｜][^<>\r\n]{0,128}[|｜]>")
@@ -28,20 +54,22 @@ def sanitize_model_reserved_tokens(text: str) -> str:
     return sanitized.strip()
 
 
-def build_message_dict(event: Mapping[str, Any], settings: LiveAdapterSettings, *, reason: str = "") -> dict[str, Any]:
+def build_message_dict(
+    event: Mapping[str, Any], settings: LiveAdapterSettings, *, reason: str = ""
+) -> dict[str, Any]:
     """Build a MaiBot MessageDict from a selected live event."""
 
     user_id = str(event.get("user_id") or "anonymous").strip()
     username = str(event.get("username") or user_id).strip()
     room_id = str(settings.bilibili.room_id)
-    text = sanitize_model_reserved_tokens(str(event.get("text") or event.get("summary") or ""))
+    text = sanitize_model_reserved_tokens(
+        str(event.get("text") or event.get("summary") or "")
+    )
     message_id = str(event.get("event_id") or f"bilibili-live-{uuid4().hex}").strip()
     timestamp = _normalize_epoch_seconds(event.get("timestamp"))
-    qq_account = str(getattr(getattr(global_config, "bot", None), "qq_account", "") or "").strip()
-    memory_chat_id = SessionUtils.calculate_session_id(
+    memory_chat_id = _calculate_session_id(
         "qq",
         group_id=room_id,
-        account_id=qq_account if qq_account not in {"", "0"} else None,
     )
     additional_config = {
         "platform_io_account_id": settings.identity.bot_user_id,
@@ -97,11 +125,9 @@ def build_sts2_message_dict(
     normalized_event_type = str(event_type or "sts2").strip() or "sts2"
     message_id = f"bilibili-live-{normalized_event_type}-{uuid4().hex}"
     room_id = str(settings.bilibili.room_id)
-    qq_account = str(getattr(getattr(global_config, "bot", None), "qq_account", "") or "").strip()
-    memory_chat_id = SessionUtils.calculate_session_id(
+    memory_chat_id = _calculate_session_id(
         "qq",
         group_id=room_id,
-        account_id=qq_account if qq_account not in {"", "0"} else None,
     )
     additional_config: dict[str, Any] = {
         "platform_io_account_id": settings.identity.bot_user_id,
@@ -231,7 +257,9 @@ def extract_live_output_text_from_message(message: Mapping[str, Any]) -> str:
             if segment_type == "reply":
                 has_reply_segment = True
                 if isinstance(data, Mapping):
-                    target_content = str(data.get("target_message_content") or "").strip()
+                    target_content = str(
+                        data.get("target_message_content") or ""
+                    ).strip()
                     if target_content:
                         reply_targets.append(target_content)
                 continue
@@ -276,7 +304,7 @@ def _sanitize_legacy_bilibili_reply_tokens(text: str) -> str:
         end = sanitized.find(")", start)
         if end < 0:
             break
-        sanitized = f"{sanitized[:start]}[引用回复]{sanitized[end + 1:]}"
+        sanitized = f"{sanitized[:start]}[引用回复]{sanitized[end + 1 :]}"
     while True:
         start = sanitized.find("(bilibili-history-")
         if start < 0:
@@ -284,7 +312,7 @@ def _sanitize_legacy_bilibili_reply_tokens(text: str) -> str:
         end = sanitized.find(")", start)
         if end < 0:
             break
-        sanitized = f"{sanitized[:start]}[引用回复]{sanitized[end + 1:]}"
+        sanitized = f"{sanitized[:start]}[引用回复]{sanitized[end + 1 :]}"
     return sanitized
 
 

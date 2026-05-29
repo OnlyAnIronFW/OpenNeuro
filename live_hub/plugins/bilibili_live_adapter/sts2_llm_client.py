@@ -1,4 +1,8 @@
-"""Separate LLM client for STS2 decisions."""
+"""Separate LLM client for STS2 decisions.
+
+This module is a placeholder for the standalone live_hub.
+The STS2 gameplay integration will be rewritten without MaiBot core dependencies.
+"""
 
 from __future__ import annotations
 
@@ -8,20 +12,19 @@ import json
 import re
 from uuid import uuid4
 
-from openai import AsyncOpenAI
-
-from src.config.config import config_manager
-from src.config.model_configs import APIProvider, ModelInfo
-from src.llm_models.openai_compat import build_openai_compatible_client_config, split_openai_request_overrides
-
-from .config import STS2LLMConfig
 from .sts2_controller import STS2Decision
 
 
 class STS2DecisionClient:
-    """Call a configured OpenAI-compatible model for STS2 action decisions."""
+    """Call a configured OpenAI-compatible model for STS2 action decisions.
 
-    def __init__(self, config: STS2LLMConfig, *, logger: Any = None) -> None:
+    NOTE: This implementation is a no-op placeholder. The STS2 gameplay
+    integration is being redesigned for the standalone live_hub and does
+    not currently function. Bilibili danmaku capture and distribution are
+    unaffected.
+    """
+
+    def __init__(self, config: Any, *, logger: Any = None) -> None:
         self.config = config
         self.logger = logger
 
@@ -32,88 +35,10 @@ class STS2DecisionClient:
         available_actions: list[dict[str, Any]],
         history: list[dict[str, Any]],
     ) -> STS2Decision:
-        provider, model_identifier, model_extra_params = self._resolve_provider_and_model()
-        self._log_info(
-            "STS2 decision LLM resolved: "
-            f"provider={getattr(provider, 'name', self.config.api_provider)!r} model={model_identifier!r} "
-            f"enable_thinking={bool(self.config.enable_thinking)}"
+        raise NotImplementedError(
+            "STS2DecisionClient is not yet available in standalone live_hub. "
+            "The STS2 gameplay integration is being rewritten."
         )
-        client_config = build_openai_compatible_client_config(provider)
-        request_overrides = split_openai_request_overrides(
-            {
-                **model_extra_params,
-                "enable_thinking": bool(self.config.enable_thinking),
-            }
-        )
-        client = AsyncOpenAI(
-            api_key=client_config.api_key,
-            base_url=client_config.base_url,
-            timeout=self.config.timeout_sec,
-            max_retries=provider.max_retry,
-            default_headers=client_config.default_headers or None,
-            default_query=client_config.default_query or None,
-        )
-        prompt = build_sts2_decision_prompt(
-            state=state,
-            available_actions=available_actions,
-            history=history,
-        )
-        try:
-            self._log_info(
-                "Requesting STS2 decision: "
-                f"state_keys={list(state)[:20]} available_actions={len(available_actions)} history={len(history)}"
-            )
-            response = await client.chat.completions.create(
-                model=model_identifier,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are controlling Slay the Spire 2 through a constrained MCP tool. "
-                            "Return only JSON. Do not include hidden reasoning or chain-of-thought."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-                response_format={"type": "json_object"},
-                extra_headers=request_overrides.extra_headers or None,
-                extra_query=request_overrides.extra_query or None,
-                extra_body=request_overrides.extra_body or None,
-            )
-            content = response.choices[0].message.content if response.choices else ""
-            decision = parse_sts2_decision_response(str(content or ""))
-            self._log_info(f"STS2 decision parsed: decision_id={decision.decision_id} action={decision.action_kwargs()}")
-            return decision
-        except Exception:
-            self._log_exception("STS2 decision LLM request failed")
-            raise
-
-    def _resolve_provider_and_model(self) -> tuple[APIProvider, str, dict[str, Any]]:
-        model_config = config_manager.get_model_config()
-        models_by_name = {model.name: model for model in model_config.models}
-        providers_by_name = {provider.name: provider for provider in model_config.api_providers}
-
-        model_info: ModelInfo | None = None
-        if self.config.model_name:
-            model_info = models_by_name.get(self.config.model_name)
-            if model_info is None:
-                raise RuntimeError(f"STS2 LLM model_name not found in model_config: {self.config.model_name}")
-
-        if model_info is not None:
-            provider = providers_by_name.get(model_info.api_provider)
-            if provider is None:
-                raise RuntimeError(f"STS2 LLM provider not found in model_config: {model_info.api_provider}")
-            return provider, model_info.model_identifier, dict(model_info.extra_params or {})
-
-        provider = providers_by_name.get(self.config.api_provider)
-        if provider is None:
-            raise RuntimeError(f"STS2 LLM api_provider not found in model_config: {self.config.api_provider}")
-        model_identifier = self.config.model_identifier.strip()
-        if not model_identifier:
-            raise RuntimeError("STS2 LLM model_identifier is empty.")
-        return provider, model_identifier, {}
 
     def _log_info(self, message: str) -> None:
         if self.logger is not None:
@@ -180,7 +105,9 @@ def parse_sts2_decision_response(response_text: str) -> STS2Decision:
     if not action:
         raise ValueError("STS2 decision response is missing action.")
     reason = str(payload.get("reason") or "").strip()
-    narration = str(payload.get("narration") or payload.get("commentary") or reason).strip()
+    narration = str(
+        payload.get("narration") or payload.get("commentary") or reason
+    ).strip()
     return STS2Decision(
         decision_id=str(payload.get("decision_id") or f"sts2-decision-{uuid4().hex}"),
         action=action,
@@ -197,7 +124,9 @@ def parse_sts2_decision_response(response_text: str) -> STS2Decision:
 def _extract_json_object(text: str) -> dict[str, Any]:
     normalized = str(text or "").strip()
     if normalized.startswith("```"):
-        normalized = re.sub(r"^```(?:json)?", "", normalized.strip(), flags=re.IGNORECASE).strip()
+        normalized = re.sub(
+            r"^```(?:json)?", "", normalized.strip(), flags=re.IGNORECASE
+        ).strip()
         normalized = re.sub(r"```$", "", normalized).strip()
     try:
         payload = json.loads(normalized)

@@ -22,6 +22,10 @@ mss>=9.0
 # 可观测性
 prometheus-client>=0.19
 
+# GUI 后端
+fastapi>=0.116.0
+uvicorn>=0.30
+
 # 异步
 aiohttp>=3.9
 
