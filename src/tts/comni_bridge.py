@@ -135,6 +135,7 @@ class ComniTTSBridge:
                 "token2wav_device": "gpu:0",
                 "output_dir": self._cfg.output_dir,
                 "voice_audio": self._cfg.voice_audio,
+                "system_prompt": "Speak your response aloud using the reference voice. Always generate speech audio.",
             }
         ).encode()
         try:
@@ -178,6 +179,9 @@ class ComniTTSBridge:
             return False
 
     def _speak_blocking(self, text: str) -> bool:
+        # Re-init omni session before each speak to guarantee speech output
+        if not self._init_omni_sync():
+            return False
         self._cnt += 1
         if not self._prefill(text):
             return False
@@ -187,9 +191,40 @@ class ComniTTSBridge:
             return True
         return False
 
+    def _init_omni_sync(self) -> bool:
+        url = f"{self._cfg.llama_host}/v1/stream/omni_init"
+        data = json.dumps(
+            {
+                "media_type": 2,
+                "use_tts": True,
+                "duplex_mode": False,
+                "model_dir": self._cfg.model_dir,
+                "tts_bin_dir": str(Path(self._cfg.model_dir) / "tts"),
+                "tts_gpu_layers": 100,
+                "token2wav_device": "gpu:0",
+                "output_dir": self._cfg.output_dir,
+                "voice_audio": self._cfg.voice_audio,
+            }
+        ).encode()
+        try:
+            r = urllib.request.urlopen(
+                urllib.request.Request(
+                    url, data=data, headers={"Content-Type": "application/json"}
+                ),
+                timeout=120,
+            )
+            resp = json.loads(r.read())
+            self._cnt = 0
+            return resp.get("success", False)
+        except Exception as e:
+            logger.error(f"reinit omni: {e}")
+            return False
+
     def _prefill(self, text: str) -> bool:
         url = f"{self._cfg.llama_host}/v1/stream/prefill"
-        data = json.dumps({"text": text, "cnt": self._cnt}).encode()
+        # Prepend speak instruction to trigger TTS
+        speak_text = f"Please read the following text aloud in your voice: {text}"
+        data = json.dumps({"text": speak_text, "cnt": self._cnt}).encode()
         try:
             r = urllib.request.urlopen(
                 urllib.request.Request(
