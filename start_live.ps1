@@ -37,19 +37,15 @@ try {
     }
 }
 
-# 2. MiniCPM
+# 2. MiniCPM (Comni, port 19060)
 try {
-    $null = Invoke-WebRequest -Uri "http://localhost:9060/health" -TimeoutSec 2
-    Write-Host "[2/4] MiniCPM 已在运行" -ForegroundColor Green
+    $null = Invoke-WebRequest -Uri "http://localhost:19060/health" -TimeoutSec 2
+    Write-Host "[2/4] MiniCPM (Comni) 已在运行 (:19060)" -ForegroundColor Green
 } catch {
-    Write-Host "[2/4] 启动 MiniCPM-o 4.5..." -ForegroundColor Yellow
-    Start-Process -FilePath "F:\llm\llama.cpp-upstream\build\bin\Release\llama-server.exe" `
-        -ArgumentList "-m","F:\llm\models\MiniCPM-o-4_5-Q4_K_M.gguf",`
-                      "--mmproj","F:\llm\models\vision\MiniCPM-o-4_5-vision-F16.gguf",`
-                      "--port","9060","--host","127.0.0.1","-ngl","99","-c","4096","--temp","0.1" `
-        -WindowStyle Minimized
-    Write-Host "  等待模型加载 (30秒)..." -ForegroundColor Yellow
-    Start-Sleep 30
+    Write-Host "[2/4] [错误] Comni 未启动! 请先启动 F:\\Comni\\Comni.exe" -ForegroundColor Red
+    Write-Host "  然后重新运行此脚本" -ForegroundColor Red
+    Read-Host "`n按 Enter 退出"
+    exit 1
 }
 
 # 3. GUI

@@ -36,7 +36,7 @@ class VisualPipeline:
         resolution: int = 512,
         change_threshold: float = 0.05,
         use_vit: bool = False,
-        vit_api_base: str = "http://localhost:9060",
+        vit_api_base: str = "http://localhost:19060",
     ):
         self._fps = fps
         self._resolution = resolution

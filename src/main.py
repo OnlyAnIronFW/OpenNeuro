@@ -59,7 +59,7 @@ class AIStreamer:
 
         # S1 (MiniCPM)
         s1_client = MiniCPMClient(
-            base_url="http://localhost:9060",
+            base_url="http://localhost:19060",
             timeout_ms=c.s1_decision.silence_watchdog_ms / 10,
             mock_mode=not self._check_s1(),
         )

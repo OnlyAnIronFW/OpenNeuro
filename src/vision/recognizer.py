@@ -14,8 +14,8 @@ from PIL import Image
 
 @dataclass
 class SceneResult:
-    description: str = ""       # 自然语言场景描述 (10-20字)
-    detail: str = ""             # 详细描述 (可选, 供S2使用)
+    description: str = ""  # 自然语言场景描述 (10-20字)
+    detail: str = ""  # 详细描述 (可选, 供S2使用)
     is_changed: bool = True
     is_static: bool = False
     confidence: float = 0.5
@@ -47,7 +47,9 @@ class VisionRecognizer:
         "Reply ONLY the description, no prefixes."
     )
 
-    def __init__(self, api_base: str = "http://localhost:9060", timeout_ms: int = 5000):
+    def __init__(
+        self, api_base: str = "http://localhost:19060", timeout_ms: int = 5000
+    ):
         self._api_base = api_base.rstrip("/")
         self._timeout_ms = timeout_ms
         self._session: Optional[aiohttp.ClientSession] = None
@@ -66,7 +68,9 @@ class VisionRecognizer:
 
     # ── 核心接口 ───────────────────────────────────────
 
-    async def recognize(self, frame: np.ndarray, *, detailed: bool = False) -> SceneResult:
+    async def recognize(
+        self, frame: np.ndarray, *, detailed: bool = False
+    ) -> SceneResult:
         """
         识别当前画面, 返回自然语言场景描述。
 
@@ -120,13 +124,18 @@ class VisionRecognizer:
         async with self._session.post(
             f"{self._api_base}/v1/chat/completions",
             json={
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                        {"type": "text", "text": prompt},
-                    ],
-                }],
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ],
                 "max_tokens": 128,
                 "temperature": 0.1,
                 "stream": False,
@@ -134,8 +143,10 @@ class VisionRecognizer:
         ) as resp:
             if resp.status != 200:
                 body = await resp.text()
-                return SceneResult(error=f"HTTP {resp.status}: {body[:100]}",
-                                   latency_ms=(time.perf_counter() - t0) * 1000)
+                return SceneResult(
+                    error=f"HTTP {resp.status}: {body[:100]}",
+                    latency_ms=(time.perf_counter() - t0) * 1000,
+                )
             data = await resp.json()
 
         latency_ms = (time.perf_counter() - t0) * 1000

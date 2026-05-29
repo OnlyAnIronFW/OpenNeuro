@@ -12,6 +12,7 @@ import aiohttp
 @dataclass
 class S1RawResponse:
     """MiniCPM 原始响应"""
+
     content: str
     latency_ms: float
     tokens_generated: int = 0
@@ -28,7 +29,7 @@ class MiniCPMClient:
 
     def __init__(
         self,
-        base_url: str = "http://localhost:9060",
+        base_url: str = "http://localhost:19060",
         timeout_ms: float = 500.0,
         max_retries: int = 1,
         mock_mode: bool = False,
