@@ -70,12 +70,26 @@ async def main(args=None):
         print(f"[!] MiniCPM 未就绪，请先运行 start_minicpm.bat", flush=True)
         return
 
+    # 2.5. TTS Bridge (先启动, 决定 S1 端口)
+    tts_bridge = None
+    try:
+        from src.tts import get_comni_bridge
+
+        tts_bridge = await get_comni_bridge()
+        s1_url = (
+            tts_bridge.llama_host if tts_bridge.is_ready() else "http://localhost:19060"
+        )
+        print(f"[*] TTS bridge: {s1_url}", flush=True)
+    except Exception as e:
+        s1_url = "http://localhost:19060"
+        print(f"[!] TTS bridge failed: {e}", flush=True)
+
     # 3. AI
     print(f"[*] 启动AI...", flush=True)
     streamer = AIStreamer()
     # 强制真实S1 (覆盖__init__中的auto-detection)
     streamer._s1._client._mock_mode = False
-    streamer._s1._client._base_url = "http://localhost:9060"
+    streamer._s1._client._base_url = s1_url
     streamer._s2._mock_mode = False
     try:
         await streamer.start()
@@ -91,21 +105,11 @@ async def main(args=None):
     total_danmaku = 0
     total_replies = 0
 
-    # TTS 引擎 (按需延迟加载)
-    tts_engine = None
+    # TTS bridge 已在上面启动, 直接引用
+    _tts_bridge = tts_bridge
 
     async def _ensure_tts():
-        nonlocal tts_engine
-        if tts_engine is not None:
-            return tts_engine
-        try:
-            from src.tts import get_comni_bridge
-
-            tts_engine = await get_comni_bridge()
-            return tts_engine
-        except Exception as e:
-            print(f"[!] TTS init failed: {e}", flush=True)
-            return None
+        return _tts_bridge
 
     async def on_msg(msg):
         nonlocal total_danmaku, total_replies
