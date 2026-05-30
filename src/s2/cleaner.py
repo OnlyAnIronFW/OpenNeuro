@@ -34,19 +34,19 @@ class S2OutputCleaner:
 
     # Step 2: 动作描述匹配
     _BRACKET_RE = re.compile(
-        r'[\(（][^)）]{0,8}[\)）]'  # 中英文括号, 内容0-8字
+        r"[\(（][^)）]{0,8}[\)）]"  # 中英文括号, 内容0-8字
     )
-    _ASTERISK_RE = re.compile(r'\*[^*]{0,8}\*')  # *动作*
-    _ANGLE_RE = re.compile(r'<[^>]{0,8}>')       # <动作>
+    _ASTERISK_RE = re.compile(r"\*[^*]{0,8}\*")  # *动作*
+    _ANGLE_RE = re.compile(r"<[^>]{0,8}>")  # <动作>
 
     # Step 3: 元文本前缀
     _META_PREFIXES = [
-        re.compile(r'^(根据|按照|基于|参考).{0,20}(分析|判断|认为)'),
-        re.compile(r'^(让我|我来|先).{0,10}(思考|分析|想想)'),
-        re.compile(r'^(作为|身为).{0,15}(我|AI|助手)'),
-        re.compile(r'^(以下是|这是我的|回复[：:])'),
-        re.compile(r'^我(应该|可以|会|能).{0,15}(回复|回答|说)'),
-        re.compile(r'^(好的|好|OK)[，,].{0,15}(来看看|分析|总结|回复)'),
+        re.compile(r"^(根据|按照|基于|参考).{0,20}(分析|判断|认为)"),
+        re.compile(r"^(让我|我来|先).{0,10}(思考|分析|想想)"),
+        re.compile(r"^(作为|身为).{0,15}(我|AI|助手)"),
+        re.compile(r"^(以下是|这是我的|回复[：:])"),
+        re.compile(r"^我(应该|可以|会|能).{0,15}(回复|回答|说)"),
+        re.compile(r"^(好的|好|OK)[，,].{0,15}(来看看|分析|总结|回复)"),
     ]
 
     # ── 公共接口 ──────────────────────────────────────
@@ -58,14 +58,16 @@ class S2OutputCleaner:
 
         # Step 1
         text, w = self._strip_json(text)
-        if w: warnings.append(w)
+        if w:
+            warnings.append(w)
 
         # Step 2
         text = self._strip_actions(text)
 
         # Step 3
         text, w = self._strip_meta(text)
-        if w: warnings.append(w)
+        if w:
+            warnings.append(w)
 
         # Step 4
         if not self._check_language(text, expected_language):
@@ -91,8 +93,8 @@ class S2OutputCleaner:
 
         # ``` 包装
         if t.startswith("```"):
-            t = re.sub(r'^```\w*\s*', '', t)
-            t = re.sub(r'\s*```$', '', t)
+            t = re.sub(r"^```\w*\s*", "", t)
+            t = re.sub(r"\s*```$", "", t)
             t = t.strip()
 
         # 尝试 JSON parse
@@ -105,7 +107,7 @@ class S2OutputCleaner:
             pass
 
         # 去掉 "回复:" / "Reply:" 前缀
-        t = re.sub(r'^(回复|Reply|Response|输出)[：:]\s*', '', t, flags=re.IGNORECASE)
+        t = re.sub(r"^(回复|Reply|Response|输出)[：:]\s*", "", t, flags=re.IGNORECASE)
 
         return t.strip(), ""
 
@@ -114,10 +116,10 @@ class S2OutputCleaner:
     @classmethod
     def _strip_actions(cls, text: str) -> str:
         """去掉括号/星号/尖括号内的短动作描述"""
-        text = cls._BRACKET_RE.sub('', text)
-        text = cls._ASTERISK_RE.sub('', text)
-        text = cls._ANGLE_RE.sub('', text)
-        return ' '.join(text.split())
+        text = cls._BRACKET_RE.sub("", text)
+        text = cls._ASTERISK_RE.sub("", text)
+        text = cls._ANGLE_RE.sub("", text)
+        return " ".join(text.split())
 
     # ── Step 3: 元文本 ────────────────────────────────
 
@@ -127,12 +129,12 @@ class S2OutputCleaner:
         for pat in cls._META_PREFIXES:
             m = pat.match(text)
             if m:
-                idx = text.find('。')
+                idx = text.find("。")
                 if 0 < idx < 50:
-                    return text[idx + 1:].strip(), "meta_stripped"
+                    return text[idx + 1 :].strip(), "meta_stripped"
                 else:
-                    # 找不到句号 → 整个句子可能是纯元文本
-                    return "", "meta_stripped"
+                    # 找不到句号 → 整句可能被误伤; 保留原文, 标记警告
+                    return text, "meta_stripped_to_empty_guarded"
         return text, ""
 
     # ── Step 4: 语言 ──────────────────────────────────
@@ -141,8 +143,8 @@ class S2OutputCleaner:
     def _check_language(text: str, expected: str) -> bool:
         if not text:
             return True
-        cn = sum(1 for c in text if '一' <= c <= '鿿')
-        en = len(re.findall(r'[a-zA-Z]+', text))
+        cn = sum(1 for c in text if "一" <= c <= "鿿")
+        en = len(re.findall(r"[a-zA-Z]+", text))
         ratio = cn / max(len(text), 1)
         if expected == "zh":
             return ratio > 0.2
@@ -157,8 +159,8 @@ class S2OutputCleaner:
         if len(text) <= max_len:
             return text
         truncated = text[:max_len]
-        for sep in ('。', '！', '？', '!', '?', '.'):
+        for sep in ("。", "！", "？", "!", "?", "."):
             last = truncated.rfind(sep)
             if last > max_len * 0.5:
-                return truncated[:last + 1]
+                return truncated[: last + 1]
         return truncated

@@ -1,11 +1,11 @@
 """AI 主播 Electron GUI 后端 — FastAPI"""
 
 import asyncio
-import os
 import time
 from pathlib import Path
 from typing import Optional, Tuple
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -13,6 +13,8 @@ from pydantic import BaseModel
 
 from src.main import AIStreamer
 from src.utils.logger import log_manager
+
+load_dotenv()
 
 _tts_engine = None
 
@@ -69,10 +71,9 @@ class ContentRequest(BaseModel):
 @app.on_event("startup")
 async def startup():
     global streamer
-    os.environ.setdefault("DEEPSEEK_API_KEY", "")
     streamer = AIStreamer(config_path=str(CONFIG_PATH))
     streamer._s1._client._mock_mode = True  # S1 始终mock (MiniCPM需手动启动)
-    # S2: 有API key就用真实, 没有就mock
+    # S2: load_dotenv() 已加载 .env, Config 自动展开 ${DEEPSEEK_API_KEY}
     api_key = streamer._cfg.current.s2_model.api_key
     streamer._s2._mock_mode = not (api_key and not api_key.startswith("${"))
     await streamer.start()
@@ -130,6 +131,7 @@ async def send_message(req: MessageRequest):
             "total_latency_ms": (time.perf_counter() - t0) * 1000,
             "cache_hit": False,
             "clean_warnings": [],
+            "error": "S2 API call failed (check API key)" if not reply else None,
         }
 
     # S2 real → 走完整 handle_message 管道
@@ -144,7 +146,8 @@ async def send_message(req: MessageRequest):
             "user": req.user,
             "text": text,
             "mentioned_bot": req.mentioned_bot,
-        }
+        },
+        bypass_rules=True,
     )
 
     # TTS 语音输出
@@ -162,6 +165,7 @@ async def send_message(req: MessageRequest):
         "total_latency_ms": total_ms,
         "cache_hit": last.cache_hit if last else False,
         "clean_warnings": last.clean_warnings if last else [],
+        "error": "S2 pipeline returned empty reply" if not reply else None,
     }
 
 
@@ -187,7 +191,7 @@ def _gen_mock_s1_direction(text: str) -> Tuple[str, float]:
     if any(w in text_lower for w in ("空", "怎么回", "不说话")):
         return ("观众抱怨回复太短或空, 解释或怼回去", 0.4)
     if len(text) <= 5:
-        return (f"观众发了条很短的消息, 随意回应一下", 0.3)
+        return ("观众发了条很短的消息, 随意回应一下", 0.3)
     return (f"观众说: {text[:30]}, 以主播身份自然回复", 0.5)
 
 
@@ -230,10 +234,15 @@ async def _direct_s2_reply(
         if resp.error:
             print(f"[S2 direct] error: {resp.error}")
             return None
-        if not resp.content.strip():
+        content = resp.content
+        if not content.strip():
             print(f"[S2 direct] empty content, thinking={len(resp.thinking)}")
-            return None
-        clean = s._cleaner.clean(resp.content)
+            if resp.thinking.strip():
+                print("[S2 direct] using thinking as content fallback")
+                content = resp.thinking.strip()
+            else:
+                return None
+        clean = s._cleaner.clean(content)
         return clean.text if not clean.is_empty else None
     finally:
         await real_client.stop()
@@ -462,6 +471,8 @@ async def knowledge_files():
 
 @app.get("/api/knowledge/file/{name}")
 async def knowledge_file(name: str):
+    if ".." in name or "/" in name or "\\" in name:
+        return JSONResponse(content={"error": "invalid filename"}, status_code=400)
     p = Path("data/knowledge") / name
     if p.exists():
         return {"content": p.read_text(encoding="utf-8")}
@@ -481,6 +492,8 @@ async def skills_list():
 
 @app.get("/api/skills/file/{name}")
 async def skills_file(name: str):
+    if ".." in name or "/" in name or "\\" in name:
+        return JSONResponse(content={"error": "invalid filename"}, status_code=400)
     p = Path("data/memory/skills") / name
     if p.exists():
         return {"content": p.read_text(encoding="utf-8")}

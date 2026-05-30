@@ -42,7 +42,10 @@ class DeepSeekClient:
     # thinking 模式 → API 参数 + 推荐 token 预算
     THINKING_CONFIG = {
         ThinkingMode.NON_THINK: {"thinking_type": "disabled"},
-        ThinkingMode.THINK_HIGH: {"thinking_type": "enabled", "reasoning_effort": "high"},
+        ThinkingMode.THINK_HIGH: {
+            "thinking_type": "enabled",
+            "reasoning_effort": "high",
+        },
         ThinkingMode.THINK_MAX: {"thinking_type": "enabled", "reasoning_effort": "max"},
     }
     MODE_TOKEN_BUDGET = {
@@ -211,15 +214,22 @@ class DeepSeekClient:
             if resp.status != 200:
                 body = await resp.text()
                 raise aiohttp.ClientResponseError(
-                    resp.request_info, resp.history, status=resp.status,
-                    message=body[:300], headers=resp.headers,
+                    resp.request_info,
+                    resp.history,
+                    status=resp.status,
+                    message=body[:300],
+                    headers=resp.headers,
                 )
             data = await resp.json()
 
         total_ms = (time.perf_counter() - t_start) * 1000
         choice = data["choices"][0]
         content = (choice["message"].get("content") or "").strip()
-        thinking = (choice["message"].get("reasoning_content") or "")
+        thinking = choice["message"].get("reasoning_content") or ""
+        # DeepSeek reasoning 模式下, content 可能为空但 reasoning_content 有内容 → 回退
+        if not content and thinking:
+            content = thinking.strip()
+            thinking = ""
 
         return S2Response(
             content=content,
