@@ -4,7 +4,7 @@ import asyncio
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 
 from src.config.loader import ConfigManager
 from src.prompts.assembler import PromptAssembler
@@ -24,7 +24,7 @@ from src.iteration.recorder import Recorder
 from src.session.degradation import DegradationManager, DegradationLevel
 from src.session.lifecycle import Session
 from src.observability.metrics import metrics
-from src.observability.security import BehaviorMonitor
+from src.observability.security import BehaviorMonitor, InputSanitizer
 from src.events.bus import EventBus
 from src.iteration.s1_trainer import S1TrainingCollector
 from src.vision.pipeline import VisualPipeline
@@ -131,6 +131,14 @@ class AIStreamer:
         # 工作状态
         self._running = False
         self._reply_history: List[ReplyRecord] = []
+
+        # 并发消息队列 — 全局时间线 + 同用户串行锁
+        self._msg_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self._user_locks: Dict[str, asyncio.Lock] = {}  # 同用户互斥
+        self._queue_workers: List[asyncio.Task] = []
+        self._worker_sem = asyncio.Semaphore(5)
+        self._state_lock = asyncio.Lock()
+        self._queue_reply_callback: Optional[Callable] = None
         self._language = "中文"
         self._session = Session()
 
@@ -154,6 +162,10 @@ class AIStreamer:
         await self._event_bus.start()
         self._event_bus_task = asyncio.create_task(self._event_bus.run_forever())
         self._running = True
+        # 启动队列消费者
+        NUM_WORKERS = 3
+        for _ in range(NUM_WORKERS):
+            self._queue_workers.append(asyncio.create_task(self._queue_worker()))
         self._session.start()
         if self._recorder:
             self._recorder.start()
@@ -166,6 +178,20 @@ class AIStreamer:
 
     async def stop(self) -> None:
         self._running = False
+        # 取消队列消费者
+        for task in self._queue_workers:
+            task.cancel()
+        if self._queue_workers:
+            await asyncio.gather(*self._queue_workers, return_exceptions=True)
+        self._queue_workers.clear()
+        # 排空残留 (worker 被取消时可能未调用 task_done)
+        while not self._msg_queue.empty():
+            try:
+                self._msg_queue.get_nowait()
+                self._msg_queue.task_done()
+            except asyncio.QueueEmpty:
+                break
+        await self._msg_queue.join()
         await self._s1.stop()
         await self._s2.stop()
         self._threads.prune_stale()
@@ -189,9 +215,15 @@ class AIStreamer:
 
     # ── 核心: 消息处理 ───────────────────────────────
 
-    async def handle_message(self, msg: Dict[str, Any]) -> Optional[str]:
+    async def handle_message(
+        self, msg: Dict[str, Any], bypass_rules: bool = False
+    ) -> Optional[str]:
         """
         处理一条消息的完整闭环。
+
+        Args:
+            msg: 消息字典
+            bypass_rules: True 时跳过 S1 规则引擎的保护期+频率限制 (GUI direct-send)
 
         Returns:
             发送的回复文本, 或 None (本次不回复)
@@ -201,6 +233,10 @@ class AIStreamer:
 
         t_start = time.perf_counter()
         user_id = msg.get("user_id", msg.get("user", "anonymous"))
+
+        # 输入清洗 — 防止提示注入
+        raw_text = msg.get("text", "")
+        msg["text"] = InputSanitizer.sanitize(raw_text)
 
         await self._event_bus.emit(
             "PLATFORM_MESSAGE_RECEIVED",
@@ -231,6 +267,7 @@ class AIStreamer:
             working_memory={
                 "seconds_since_last_reply": self._s1.seconds_since_last_reply
             },
+            bypass_checks=bypass_rules,
         )
 
         # ── 1b. 记录 S1 训练数据 ──
@@ -276,32 +313,33 @@ class AIStreamer:
         # ── 3. Quick-Reply → 直接输出 ──
         if token == S1Token.QUICK_REPLY and s1_result.parsed.quick_reply_text:
             reply = s1_result.parsed.quick_reply_text
-            self._s1.record_reply()
+            async with self._state_lock:
+                self._s1.record_reply()
+                self._update_emotion(msg)
+                self._record(
+                    ReplyRecord(
+                        text=reply,
+                        trigger_msg=msg,
+                        timestamp=time.time(),
+                        s1_token="Quick-Reply",
+                        s1_confidence=confidence,
+                        s2_latency_ms=0,
+                        cache_hit=False,
+                    )
+                )
+                # Quick-Reply 也写入记忆
+                self._memory.record_recall(
+                    query=msg.get("text", ""),
+                    reply=reply,
+                    user_id=user_id,
+                    s1_token="Quick-Reply",
+                )
+                self._memory.upsert_viewer(user_id, msg.get("user", ""))
             if self._recorder:
                 self._recorder.record_s1_decision(
                     token.value, confidence, reply, s1_result.s1_latency_ms
                 )
                 self._recorder.record_s2_reply(reply, 0, "non-think", 0)
-            self._update_emotion(msg)
-            self._record(
-                ReplyRecord(
-                    text=reply,
-                    trigger_msg=msg,
-                    timestamp=time.time(),
-                    s1_token="Quick-Reply",
-                    s1_confidence=confidence,
-                    s2_latency_ms=0,
-                    cache_hit=False,
-                )
-            )
-            # Quick-Reply 也写入记忆
-            self._memory.record_recall(
-                query=msg.get("text", ""),
-                reply=reply,
-                user_id=user_id,
-                s1_token="Quick-Reply",
-            )
-            self._memory.upsert_viewer(user_id, msg.get("user", ""))
             # 后台异步写入 Graphiti
             if self._use_graphiti:
                 asyncio.create_task(
@@ -320,18 +358,27 @@ class AIStreamer:
         cache_key = f"{direction}|{msg.get('text', '')}"
         cached = self._cache.get(cache_key)
         if cached:
-            self._s1.record_reply()
-            self._record(
-                ReplyRecord(
-                    text=cached,
-                    trigger_msg=msg,
-                    timestamp=time.time(),
-                    s1_token="Start-Speaking",
-                    s1_confidence=confidence,
-                    s2_latency_ms=0,
-                    cache_hit=True,
+            async with self._state_lock:
+                self._s1.record_reply()
+                self._update_emotion(msg)
+                self._record(
+                    ReplyRecord(
+                        text=cached,
+                        trigger_msg=msg,
+                        timestamp=time.time(),
+                        s1_token="Start-Speaking",
+                        s1_confidence=confidence,
+                        s2_latency_ms=0,
+                        cache_hit=True,
+                    )
                 )
-            )
+                self._memory.record_recall(
+                    query=msg.get("text", ""),
+                    reply=cached,
+                    user_id=user_id,
+                )
+                self._memory.upsert_viewer(user_id, msg.get("user", ""))
+                self._threads.mark_replied(thread_id)
             return cached
 
         # 4b. 记忆检索: 观众档案 + 最近互动 (Graphiti / L2 fallback)
@@ -383,18 +430,19 @@ class AIStreamer:
             # 降级: 用 S1 的方向作为回复
             fallback = direction[:80] if direction else ""
             if fallback:
-                self._s1.record_reply()
-                self._record(
-                    ReplyRecord(
-                        text=fallback,
-                        trigger_msg=msg,
-                        timestamp=time.time(),
-                        s1_token="Start-Speaking",
-                        s1_confidence=confidence,
-                        s2_latency_ms=s2_resp.total_ms,
-                        cache_hit=False,
+                async with self._state_lock:
+                    self._s1.record_reply()
+                    self._record(
+                        ReplyRecord(
+                            text=fallback,
+                            trigger_msg=msg,
+                            timestamp=time.time(),
+                            s1_token="Start-Speaking",
+                            s1_confidence=confidence,
+                            s2_latency_ms=s2_resp.total_ms,
+                            cache_hit=False,
+                        )
                     )
-                )
                 return fallback
             return None
 
@@ -406,24 +454,41 @@ class AIStreamer:
             )
             fallback = direction[:80] if direction else ""
             if fallback:
-                self._s1.record_reply()
-                self._record(
-                    ReplyRecord(
-                        text=fallback,
-                        trigger_msg=msg,
-                        timestamp=time.time(),
-                        s1_token="Start-Speaking",
-                        s1_confidence=confidence,
-                        s2_latency_ms=s2_resp.total_ms,
-                        cache_hit=False,
+                async with self._state_lock:
+                    self._s1.record_reply()
+                    self._record(
+                        ReplyRecord(
+                            text=fallback,
+                            trigger_msg=msg,
+                            timestamp=time.time(),
+                            s1_token="Start-Speaking",
+                            s1_confidence=confidence,
+                            s2_latency_ms=s2_resp.total_ms,
+                            cache_hit=False,
+                        )
                     )
-                )
                 return fallback
             return None
 
         clean_result = self._cleaner.clean(s2_resp.content)
 
         if clean_result.is_empty:
+            fallback = direction[:80] if direction else ""
+            if fallback:
+                async with self._state_lock:
+                    self._s1.record_reply()
+                    self._record(
+                        ReplyRecord(
+                            text=fallback,
+                            trigger_msg=msg,
+                            timestamp=time.time(),
+                            s1_token="Start-Speaking",
+                            s1_confidence=confidence,
+                            s2_latency_ms=s2_resp.total_ms,
+                            cache_hit=False,
+                        )
+                    )
+                return fallback
             return None
 
         # 4e. 成功指标 + 降级恢复
@@ -436,10 +501,37 @@ class AIStreamer:
         # 4f. 写入缓存
         self._cache.set(cache_key, clean_result.text)
 
-        # 4f. 情绪更新
-        self._update_emotion(msg)
+        # 4f. 情绪更新 + 录制 + 记录 + 记忆 (全部锁保护)
+        async with self._state_lock:
+            self._update_emotion(msg)
 
-        # 4g. 录制 S2
+            # 4g. 记录
+            self._s1.record_reply()
+            self._record(
+                ReplyRecord(
+                    text=clean_result.text,
+                    trigger_msg=msg,
+                    timestamp=time.time(),
+                    s1_token="Start-Speaking",
+                    s1_confidence=confidence,
+                    s2_thinking=s2_resp.thinking,
+                    s2_latency_ms=s2_resp.total_ms,
+                    cache_hit=False,
+                    clean_warnings=clean_result.warnings,
+                )
+            )
+
+            # 4g. 写入记忆 + 线程标记
+            self._memory.record_recall(
+                query=msg.get("text", ""),
+                reply=clean_result.text,
+                user_id=user_id,
+                s1_token=s1_result.parsed.token.value,
+            )
+            self._memory.upsert_viewer(user_id, msg.get("user", ""))
+            self._threads.mark_replied(thread_id)
+
+        # 4g. 录制 S2 (纯记录, 不修改共享状态)
         if self._recorder:
             self._recorder.record_s2_reply(
                 clean_result.text,
@@ -447,22 +539,6 @@ class AIStreamer:
                 s2_resp.thinking_mode.value,
                 len(s2_resp.thinking),
             )
-
-        # 4h. 记录
-        self._s1.record_reply()
-        self._record(
-            ReplyRecord(
-                text=clean_result.text,
-                trigger_msg=msg,
-                timestamp=time.time(),
-                s1_token="Start-Speaking",
-                s1_confidence=confidence,
-                s2_thinking=s2_resp.thinking,
-                s2_latency_ms=s2_resp.total_ms,
-                cache_hit=False,
-                clean_warnings=clean_result.warnings,
-            )
-        )
 
         elapsed = (time.perf_counter() - t_start) * 1000
         _log.info(
@@ -476,14 +552,6 @@ class AIStreamer:
         )
         print(f"[Reply] {clean_result.text[:50]}... ({elapsed:.0f}ms)")
 
-        # 4g. 写入记忆 + 线程标记
-        self._memory.record_recall(
-            query=msg.get("text", ""),
-            reply=clean_result.text,
-            user_id=user_id,
-            s1_token=s1_result.parsed.token.value,
-        )
-        self._memory.upsert_viewer(user_id, msg.get("user", ""))
         # 后台异步写入 Graphiti (LLM 事实提取, 不阻塞)
         if self._use_graphiti:
             asyncio.create_task(
@@ -494,7 +562,6 @@ class AIStreamer:
                     clean_result.text,
                 )
             )
-        self._threads.mark_replied(thread_id)
 
         await self._event_bus.emit(
             "REPLY_SENT",
@@ -514,6 +581,54 @@ class AIStreamer:
             if r:
                 replies.append(r)
         return replies
+
+    # ── 并发消息队列 (全局时间线 + 同用户锁 — full-duplex) ──
+
+    async def enqueue_message(self, msg: dict) -> None:
+        """推送消息到全局队列, 立即返回."""
+        await self._msg_queue.put(msg)
+
+    def on_reply(self, callback: Callable) -> None:
+        """设置队列回复回调."""
+        self._queue_reply_callback = callback
+
+    def _get_user_lock(self, user_id: str) -> asyncio.Lock:
+        """获取或创建用户串行锁 (同用户消息互斥).
+        最多缓存 1000 个锁, 超限时清理最早条目."""
+        if user_id not in self._user_locks:
+            if len(self._user_locks) >= 1000:
+                # 删除最早加入的 200 个条目
+                stale = list(self._user_locks.keys())[:200]
+                for k in stale:
+                    self._user_locks.pop(k, None)
+            self._user_locks[user_id] = asyncio.Lock()
+        return self._user_locks[user_id]
+
+    async def _queue_worker(self) -> None:
+        """全局消费者: 从队列取消息 → 同用户串行锁 → 信号量限流."""
+        while self._running:
+            try:
+                msg = await asyncio.wait_for(self._msg_queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
+
+            user_id = (msg.get("user") or msg.get("user_id") or "").strip()
+            if not user_id:
+                user_id = "__anon__"
+
+            user_lock = self._get_user_lock(user_id)
+            async with user_lock:  # 同用户串行 (不占信号量)
+                async with self._worker_sem:
+                    try:
+                        reply = await self.handle_message(msg, bypass_rules=True)
+                        if reply and self._queue_reply_callback:
+                            self._queue_reply_callback(reply, msg)
+                    except Exception as e:
+                        _log.warning(
+                            "queue_worker_error", error=str(e)[:200], user_id=user_id
+                        )
+                    finally:
+                        self._msg_queue.task_done()
 
     # ── 查询 ──────────────────────────────────────────
 
