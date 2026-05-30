@@ -17,6 +17,7 @@ _log = log_manager.get("s1")
 @dataclass
 class S1DecisionResult:
     """S1 完整决策结果"""
+
     parsed: ParsedDecision
     raw_s1_output: str
     s1_latency_ms: float
@@ -71,6 +72,7 @@ class S1Engine:
         emotional_state: str = "",
         content_strategy: Optional[Dict[str, Any]] = None,
         working_memory: Optional[Dict[str, Any]] = None,
+        bypass_checks: bool = False,
     ) -> S1DecisionResult:
         """
         执行完整 S1 决策
@@ -82,6 +84,7 @@ class S1Engine:
             emotional_state: 情绪描述
             content_strategy: 内容策略信号
             working_memory: 工作记忆状态
+            bypass_checks: 跳过规则引擎保护期+频率限制 (GUI模式)
         """
         path: List[str] = []
         now = time.time()
@@ -159,7 +162,7 @@ class S1Engine:
                     )
 
         # ── Step 5: RuleEngine ──
-        validated = self._rules.validate(parsed, now)
+        validated = self._rules.validate(parsed, now, bypass_checks=bypass_checks)
         overridden = validated.token != parsed.token
         if overridden:
             path.append(f"overridden: {parsed.token.value}→{validated.token.value}")
@@ -220,18 +223,16 @@ class S1Engine:
         for m in messages[-10:]:
             at = " [@你]" if m.get("mentioned_bot") else ""
             q = " [问题]" if m.get("is_question") else ""
-            parts.append(
-                f"[{m.get('user','?')}] {m.get('text') or ''}{at}{q}"
-            )
+            parts.append(f"[{m.get('user', '?')}] {m.get('text') or ''}{at}{q}")
 
         # 线程
         if threads:
             parts.append(f"\n【活跃线程】(共{len(threads)}个)")
             for t in threads[:5]:
                 parts.append(
-                    f"  #{t.get('id','?')} pri={t.get('priority',0):.1f} "
-                    f"[{','.join(t.get('participants',[]))}] "
-                    f"{t.get('topic_label','')}"
+                    f"  #{t.get('id', '?')} pri={t.get('priority', 0):.1f} "
+                    f"[{','.join(t.get('participants', []))}] "
+                    f"{t.get('topic_label', '')}"
                 )
 
         # 画面
@@ -241,13 +242,15 @@ class S1Engine:
         parts.append(f"【情绪】{emotion or '基线'}")
 
         # 策略
-        phase = strategy.get('current_phase', '?')
-        bias = strategy.get('speak_frequency_bias', 0)
+        phase = strategy.get("current_phase", "?")
+        bias = strategy.get("speak_frequency_bias", 0)
         parts.append(f"【策略】phase={phase} bias={bias}")
 
         # 工作记忆
-        secs = wm.get('seconds_since_last_reply', 0)
-        parts.append(f"【距上次发言】{secs:.0f}秒" if secs > 0 else "【距上次发言】首次")
+        secs = wm.get("seconds_since_last_reply", 0)
+        parts.append(
+            f"【距上次发言】{secs:.0f}秒" if secs > 0 else "【距上次发言】首次"
+        )
 
         parts.append("\n现在，请输出你的决策 Token：")
         return "\n".join(parts)

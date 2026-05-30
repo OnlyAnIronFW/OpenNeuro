@@ -60,14 +60,21 @@ async def main(args=None):
         print(f"[!] 未知平台: {platform_name}", flush=True)
         return
 
-    # 2. 检查MiniCPM
+    # 2. 检查 Comni (MiniCPM-omni) — 优先 19060, 回退 9060
     import urllib.request
 
-    try:
-        urllib.request.urlopen("http://localhost:9060/health", timeout=2)
-        print(f"[+] MiniCPM 就绪", flush=True)
-    except Exception:
-        print(f"[!] MiniCPM 未就绪，请先运行 start_minicpm.bat", flush=True)
+    comni_ready = False
+    for port in (19060, 19061, 9060):
+        try:
+            urllib.request.urlopen(f"http://localhost:{port}/health", timeout=2)
+            print(f"[+] Comni/MiniCPM 就绪 (: {port})", flush=True)
+            comni_ready = True
+            break
+        except Exception:
+            continue
+
+    if not comni_ready:
+        print(f"[!] Comni/MiniCPM 未就绪，请先启动 Comni 或 MiniCPM 服务", flush=True)
         return
 
     # 2.5. TTS Bridge (先启动, 决定 S1 端口)
@@ -111,8 +118,30 @@ async def main(args=None):
     async def _ensure_tts():
         return _tts_bridge
 
+    # ── 全双工: 回复回调 (TTS + 显示) ──
+    def on_reply_callback(reply: str, msg_ctx: dict):
+        nonlocal total_replies
+        total_replies += 1
+        print(
+            f"  >>> [{streamer._emotion.to_prompt_str()}] {reply}",
+            flush=True,
+        )
+
+        # TTS — 独立协程, 不阻塞消息处理
+        async def _tts_play():
+            eng = await _ensure_tts()
+            if eng and eng.is_ready():
+                try:
+                    await eng.speak(reply)
+                except Exception as e:
+                    print(f"  [!] TTS failed: {e}", flush=True)
+
+        asyncio.create_task(_tts_play())
+
+    streamer.on_reply(on_reply_callback)
+
     async def on_msg(msg):
-        nonlocal total_danmaku, total_replies
+        nonlocal total_danmaku
         total_danmaku += 1
         t = time.strftime("%H:%M:%S")
 
@@ -121,9 +150,8 @@ async def main(args=None):
         else:
             print(f"[{t}] [{msg.user}] {msg.text}", flush=True)
 
-        # AI 回复
-        t0 = time.perf_counter()
-        reply = await streamer.handle_message(
+        # 推入并发队列 (非阻塞, 全双工)
+        await streamer.enqueue_message(
             {
                 "user": msg.user,
                 "user_id": msg.user_id,
@@ -134,22 +162,6 @@ async def main(args=None):
                 "price": msg.monetary_value,
             }
         )
-        lat = (time.perf_counter() - t0) * 1000
-        if reply and len(reply) > 1:
-            total_replies += 1
-            print(
-                f"  >>> [{streamer._emotion.to_prompt_str()}] {reply} ({lat:.0f}ms)",
-                flush=True,
-            )
-            # TTS 语音输出
-            eng = await _ensure_tts()
-            if eng and eng.is_ready():
-                try:
-                    await eng.speak(reply)
-                except Exception as e:
-                    print(f"  [!] TTS failed: {e}", flush=True)
-        else:
-            print(f"  --- ({lat:.0f}ms)", flush=True)
 
     adapter.on_message(on_msg)
     ok = await adapter.connect()

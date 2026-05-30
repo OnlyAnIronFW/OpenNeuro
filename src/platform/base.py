@@ -1,5 +1,6 @@
 """多平台适配层 — 消息标准化 + 输出过滤"""
 
+import asyncio
 import re
 import time
 from abc import ABC, abstractmethod
@@ -53,10 +54,13 @@ class PlatformAdapter(ABC):
 
     async def _emit(self, msg: UnifiedMessage) -> None:
         for h in self._handlers:
-            try:
-                await h(msg)
-            except Exception:
-                pass
+            asyncio.create_task(self._safe_invoke(h, msg))
+
+    async def _safe_invoke(self, handler, msg):
+        try:
+            await handler(msg)
+        except Exception:
+            pass
 
     # ── 消息标准化 ────────────────────────────────────
 

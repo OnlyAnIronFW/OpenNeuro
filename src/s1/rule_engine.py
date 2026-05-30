@@ -10,6 +10,7 @@ from .parser import S1Token, ParsedDecision
 
 # ── 时间窗口: 不可变配置快照 ──────────────────────────
 
+
 @dataclass(frozen=True)
 class RuleConfig:
     protection_period_ms: int = 2000
@@ -49,10 +50,13 @@ class RuleEngine:
         self,
         parsed: ParsedDecision,
         current_time: Optional[float] = None,
+        bypass_checks: bool = False,
     ) -> ParsedDecision:
         """
         校验并可能改写决策。
         返回的可能是原决策或 Continue-Listening。
+
+        bypass_checks=True: 跳过保护期和频率限制 (GUI direct-send 模式)
         """
         now = current_time or time.time()
 
@@ -62,14 +66,16 @@ class RuleEngine:
             return parsed
 
         # ── 检查 1: 保护期 ──
-        if self._is_in_protection(now):
-            self._log_override(parsed, "protection_period", now)
-            return self._make_silent(parsed, "protection_period")
+        if not bypass_checks:
+            if self._is_in_protection(now):
+                self._log_override(parsed, "protection_period", now)
+                return self._make_silent(parsed, "protection_period")
 
         # ── 检查 2: 频率限制 ──
-        if self._is_rate_limited(now):
-            self._log_override(parsed, "rate_limit", now)
-            return self._make_silent(parsed, "rate_limit")
+        if not bypass_checks:
+            if self._is_rate_limited(now):
+                self._log_override(parsed, "rate_limit", now)
+                return self._make_silent(parsed, "rate_limit")
 
         # ── 检查 3: 连续 Token ──
         self._track_consecutive(parsed.token)
@@ -85,7 +91,8 @@ class RuleEngine:
                     token=S1Token.START_SPEAKING,
                     confidence=0.6,
                     direction=parsed.quick_reply_text,
-                    parse_warnings=parsed.parse_warnings + ["upgraded: quick_reply_too_long"],
+                    parse_warnings=parsed.parse_warnings
+                    + ["upgraded: quick_reply_too_long"],
                     raw_output=parsed.raw_output,
                 )
 
@@ -123,20 +130,20 @@ class RuleEngine:
                 return ParsedDecision(
                     token=S1Token.START_SPEAKING,
                     confidence=0.9,
-                    direction=f"紧急回复 {msg.get('user','?')} 的 @消息",
+                    direction=f"紧急回复 {msg.get('user', '?')} 的 @消息",
                     parse_warnings=["emergency: watchdog"],
                 )
             if msg.get("is_question"):
                 return ParsedDecision(
                     token=S1Token.START_SPEAKING,
                     confidence=0.75,
-                    direction=f"紧急回答 {msg.get('user','?')} 的问题",
+                    direction=f"紧急回答 {msg.get('user', '?')} 的问题",
                     parse_warnings=["emergency: watchdog_question"],
                 )
             if msg.get("event_type") == "gift":
                 return ParsedDecision(
                     token=S1Token.QUICK_REPLY,
-                    quick_reply_text=f"谢谢{msg.get('user','?')}的礼物~",
+                    quick_reply_text=f"谢谢{msg.get('user', '?')}的礼物~",
                     parse_warnings=["emergency: watchdog_gift"],
                 )
 
@@ -194,10 +201,12 @@ class RuleEngine:
         )
 
     def _log_override(self, parsed: ParsedDecision, reason: str, now: float):
-        self._overrides.append({
-            "timestamp": now,
-            "original_token": parsed.token.value,
-            "reason": reason,
-        })
+        self._overrides.append(
+            {
+                "timestamp": now,
+                "original_token": parsed.token.value,
+                "reason": reason,
+            }
+        )
         if len(self._overrides) > 100:
             self._overrides.pop(0)
