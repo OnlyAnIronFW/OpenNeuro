@@ -53,6 +53,8 @@ class ComniTTSBridge:
         self._ready = False
         self._cnt = 0
         self._play_lock = threading.Lock()
+        self._tts_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=10)
+        self._playback_task: Optional[asyncio.Task] = None
 
     async def start(self) -> bool:
         if not self._cfg.enabled:
@@ -63,6 +65,7 @@ class ComniTTSBridge:
             if not await self._init_omni():
                 return False
             self._ready = True
+            self._playback_task = asyncio.create_task(self._playback_worker())
             logger.info(f"TTS bridge ready: {self._cfg.llama_host}")
             return True
         except Exception as e:
@@ -173,10 +176,29 @@ class ComniTTSBridge:
         if not self._ready or len(text.strip()) < 2:
             return False
         try:
-            return await asyncio.to_thread(self._speak_blocking, text)
-        except Exception as e:
-            logger.error(f"speak: {e}")
-            return False
+            self._tts_queue.put_nowait(text)
+        except asyncio.QueueFull:
+            try:
+                self._tts_queue.get_nowait()
+                self._tts_queue.put_nowait(text)
+            except Exception:
+                pass
+        return True
+
+    async def _playback_worker(self):
+        logger.info("TTS playback worker started")
+        while self._ready:
+            try:
+                text = await asyncio.wait_for(self._tts_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            try:
+                await asyncio.to_thread(self._speak_blocking, text)
+            except Exception as e:
+                logger.error(f"playback worker: {e}")
+            finally:
+                self._tts_queue.task_done()
+        logger.info("TTS playback worker stopped")
 
     def _speak_blocking(self, text: str) -> bool:
         # Re-init omni session before each speak to guarantee speech output
@@ -277,6 +299,12 @@ class ComniTTSBridge:
 
     async def stop(self):
         self._ready = False
+        if self._playback_task:
+            self._playback_task.cancel()
+            try:
+                await self._playback_task
+            except asyncio.CancelledError:
+                pass
         if self._proc:
             self._proc.terminate()
             self._proc.wait(timeout=10)
